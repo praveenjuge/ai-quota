@@ -29,6 +29,28 @@ Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`;
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.
 - Menu rows are stock `NSMenuItem`s; each bar is a bar-only `NSView` that stretches to the full menu width, so bars span edge to edge under the key-hint column.
 
+## Releases
+
+Every push to `main` builds on Apple Silicon runners, bumps the patch version tag (`v0.1.0`, `v0.1.1`, …), and publishes a signed + notarized release with `.zip`, `.dmg`, and `.pkg` artifacts. The tag is created only after a successful build, so failed runs never burn a version number.
+
+CI needs these repository secrets (`gh secret set NAME --repo praveenjuge/ai-quota`):
+
+| Secret | Value |
+|---|---|
+| `APPLE_DEVELOPER_CERTIFICATE_P12_BASE64` | Base64 of the Developer ID Application `.p12` (Keychain Access → My Certificates → right-click → Export) |
+| `APPLE_DEVELOPER_CERTIFICATE_PASSWORD` | Password set when exporting the `.p12` |
+| `APPLE_ID` | Apple ID email for notarization |
+| `APPLE_APP_SPECIFIC_PASSWORD` | App-specific password from appleid.apple.com |
+| `APPLE_INSTALLER_CERTIFICATE_P12_BASE64` | (Optional) Base64 of a Developer ID Installer `.p12` — without it the PKG ships unsigned |
+| `APPLE_INSTALLER_CERTIFICATE_PASSWORD` | (Optional) Its export password — defaults to the app cert password |
+
+```sh
+base64 -i /path/to/dev-id-app.p12 | gh secret set APPLE_DEVELOPER_CERTIFICATE_P12_BASE64
+gh secret set APPLE_DEVELOPER_CERTIFICATE_PASSWORD   # paste .p12 password
+gh secret set APPLE_ID                               # paste Apple ID email
+gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific password
+```
+
 ## Settings
 
 Provider toggles, launch at login (`SMAppService`), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `keychainApproved`).
