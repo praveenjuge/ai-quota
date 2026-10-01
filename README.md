@@ -101,3 +101,12 @@ app logs. Production apps and preferences are untouched.
 
 Refresh and Check for updates use embedded native buttons so clicking them keeps
 the status menu open. Refresh shows **Refreshing…** until the new data arrives.
+
+To verify menu tracking with the canonical menu implementation:
+
+```sh
+bash scripts/verify-menu-feedback.sh dist/e2e-source/AIQuota.app
+```
+
+The signed test host clicks both embedded buttons while the menu is tracking,
+asserts it stays open through completion, and retains its results and menu image.

@@ -5,6 +5,8 @@ Artifacts are retained; only test processes started here are terminated.
 """
 import http.server
 import json
+import os
+import signal
 import pathlib
 import plistlib
 import re
@@ -102,6 +104,15 @@ def scenario(source, action):
         (root / 'menu-trees.txt').write_text('\n'.join(trees))
         # Quit only the isolated test identity; never touch the installed app.
         subprocess.run(['interceptor', 'macos', 'app', 'quit', identifier], capture_output=True)
+        # open -W may exit before a relaunched app; target the exact retained
+        # fixture path instead of assuming the launcher PID owns the app.
+        for line in run('ps', '-axo', 'pid=,command=').splitlines():
+            fields = line.strip().split(maxsplit=1)
+            if len(fields) == 2 and str(root) in fields[1] and fields[1].endswith('/Contents/MacOS/AIQuota'):
+                try:
+                    os.kill(int(fields[0]), signal.SIGTERM)
+                except ProcessLookupError:
+                    pass
         if process.poll() is None:
             process.terminate()
             process.wait(timeout=10)
@@ -116,4 +127,7 @@ if __name__ == '__main__':
         result = scenario(source, action)
         results.append(result)
         print(json.dumps(result), flush=True)
-    pathlib.Path('dist/verification/update-e2e.json').write_text(json.dumps(results, indent=2))
+    artifact = pathlib.Path('dist/verification/update-e2e.json')
+    previous = json.loads(artifact.read_text()) if artifact.exists() else []
+    by_scenario = {entry['scenario']: entry for entry in previous + results}
+    artifact.write_text(json.dumps(list(by_scenario.values()), indent=2))

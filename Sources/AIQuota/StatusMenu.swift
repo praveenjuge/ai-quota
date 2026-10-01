@@ -6,6 +6,7 @@ import AppKit
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     let menu = NSMenu()
+    private var renderedMenu = NSMenu()
     private let store: UsageStore
     private let updater: UpdateController?
     private var updateItem: NSMenuItem?
@@ -30,18 +31,19 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     /// Rebuild items from the latest snapshots (cheap, synchronous).
     func rebuild() {
-        menu.removeAllItems()
+        let previousItems = menu.items
+        renderedMenu = NSMenu()
         let enabled = ProviderID.allCases.filter { SettingsStore.isEnabled($0) }
         // Match the menu width while keeping capacity indicators inset
         // from the edges of their full-width menu-item views.
         let barWidth = measureBarWidth(enabled: enabled)
         for (index, id) in enabled.enumerated() {
-            if index > 0 { menu.addItem(.separator()) }
+            if index > 0 { renderedMenu.addItem(.separator()) }
             addSection(for: id, barWidth: barWidth)
         }
-        menu.addItem(.separator())
+        renderedMenu.addItem(.separator())
         if let last = store.lastRefresh {
-            menu.addItem(info("Updated \(last.formatted(date: .omitted, time: .shortened))", dimmed: true))
+            renderedMenu.addItem(info("Updated \(last.formatted(date: .omitted, time: .shortened))", dimmed: true))
         }
         let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
@@ -52,10 +54,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         refresh.view = refreshView
         self.refreshView = refreshView
         refreshItem = refresh
-        menu.addItem(refresh)
+        renderedMenu.addItem(refresh)
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
-        menu.addItem(settings)
+        renderedMenu.addItem(settings)
         if let updater {
             let item = NSMenuItem(title: updater.title, action: #selector(updateApp), keyEquivalent: "")
             item.target = self
@@ -65,12 +67,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.view = view
             updateView = view
             view.update(title: updater.title, enabled: updater.enabled)
-            menu.addItem(item)
+            renderedMenu.addItem(item)
         }
-        menu.addItem(.separator())
+        renderedMenu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit AIQuota", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
-        menu.addItem(quit)
+        renderedMenu.addItem(quit)
+        // Never empty a menu while it is tracking: removing its last item
+        // dismisses it. Attach the new rows before retiring the old rows.
+        let nextItems = renderedMenu.items
+        for item in nextItems {
+            renderedMenu.removeItem(item)
+            menu.addItem(item)
+        }
+        for item in previousItems { menu.removeItem(item) }
     }
 
     func menuWillOpen(_ menu: NSMenu) {
@@ -96,9 +106,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private func addSection(for id: ProviderID, barWidth: CGFloat) {
         let snap = store.snapshot(for: id)
-        menu.addItem(info(headerText(for: id, snap: snap), dimmed: true))
+        renderedMenu.addItem(info(headerText(for: id, snap: snap), dimmed: true))
         if let message = snap?.state.message {
-            menu.addItem(info(message, dimmed: true))
+            renderedMenu.addItem(info(message, dimmed: true))
             return
         }
         var rows = 0
@@ -108,7 +118,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             rows += addRow(label: extra.label, window: extra.window, barWidth: barWidth)
         }
         if rows == 0 {
-            menu.addItem(info("No usage reported yet", dimmed: true))
+            renderedMenu.addItem(info("No usage reported yet", dimmed: true))
         }
     }
 
@@ -119,7 +129,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         guard let used = window?.usedPercent, let text = rowText(label: label, window: window) else { return 0 }
         let row = info("")
         row.attributedTitle = text
-        menu.addItem(row)
+        renderedMenu.addItem(row)
         let barItem = NSMenuItem()
         let view = BarView(
             width: barWidth,
@@ -128,7 +138,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             label: label
         )
         barItem.view = view
-        menu.addItem(barItem)
+        renderedMenu.addItem(barItem)
         return 1
     }
 
