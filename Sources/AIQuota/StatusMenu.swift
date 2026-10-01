@@ -2,7 +2,7 @@ import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
 /// quota rows, then Refresh / Settings / Quit. All rows are stock menu
-/// items: text rows plus draining-bar images on their own lines.
+/// items: text rows plus native capacity indicators on their own lines.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     let menu = NSMenu()
@@ -26,8 +26,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func rebuild() {
         menu.removeAllItems()
         let enabled = ProviderID.allCases.filter { SettingsStore.isEnabled($0) }
-        // Pass 1: measure the widest text row so bars span exactly the
-        // text width (plus the key-hint column), with no right gap.
+        // Match the menu width while keeping capacity indicators inset
+        // from the edges of their full-width menu-item views.
         let barWidth = measureBarWidth(enabled: enabled)
         for (index, id) in enabled.enumerated() {
             if index > 0 { menu.addItem(.separator()) }
@@ -86,9 +86,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         row.attributedTitle = text
         menu.addItem(row)
         let barItem = NSMenuItem()
-        let view = BarView(frame: NSRect(x: 0, y: 0, width: barWidth, height: 8))
-        view.fraction = min(1, max(0, (100 - used) / 100))
-        view.color = Self.barColor(forRemaining: 100 - used)
+        let view = BarView(
+            width: barWidth,
+            remaining: 100 - used,
+            color: Self.barColor(forRemaining: 100 - used),
+            label: label
+        )
         barItem.view = view
         menu.addItem(barItem)
         return 1
@@ -115,7 +118,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     /// Widest text row in menu font, plus room for the key-hint column,
-    /// so bar images span the full menu width with no right gap.
+    /// while the indicator itself stays aligned with the menu text.
     private func measureBarWidth(enabled: [ProviderID]) -> CGFloat {
         let font = NSFont.menuFont(ofSize: NSFont.systemFontSize)
         var widest: CGFloat = 0
@@ -183,44 +186,37 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 }
 
-/// Bar-only menu item view. The menu stretches it to the full menu
-/// width (including under the key-hint column), so the bar redraws
-/// from its live bounds and always spans edge to edge.
+/// AppKit owns capacity rendering; this view only supplies menu insets.
 final class BarView: NSView {
-    var fraction: Double = 0
-    var color: NSColor = .systemGreen
+    private let indicator = NSLevelIndicator()
+    private static let horizontalInset: CGFloat = 16
 
-    override init(frame frameRect: NSRect) {
-        super.init(frame: frameRect)
+    init(width: CGFloat, remaining: Double, color: NSColor, label: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 16))
         autoresizingMask = [.width]
+        indicator.levelIndicatorStyle = .continuousCapacity
+        indicator.minValue = 0
+        indicator.maxValue = 100
+        indicator.doubleValue = remaining.isFinite ? min(100, max(0, remaining)) : 0
+        indicator.isEditable = false
+        indicator.drawsTieredCapacityLevels = false
+        // Color describes remaining quota (low is a warning), so all
+        // native capacity tiers use the same semantic color.
+        indicator.fillColor = color
+        indicator.warningFillColor = color
+        indicator.criticalFillColor = color
+        indicator.setAccessibilityLabel("\(label) quota remaining")
+        indicator.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(indicator)
+        NSLayoutConstraint.activate([
+            indicator.leadingAnchor.constraint(equalTo: leadingAnchor, constant: Self.horizontalInset),
+            indicator.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -Self.horizontalInset),
+            indicator.centerYAnchor.constraint(equalTo: centerYAnchor),
+            indicator.heightAnchor.constraint(equalToConstant: 6),
+        ])
     }
 
     required init?(coder: NSCoder) {
         fatalError("init(coder:) has not been implemented")
-    }
-
-    override func layout() {
-        super.layout()
-        needsDisplay = true
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        let height: CGFloat = 6
-        let y = (bounds.height - height) / 2
-        let width = bounds.width
-        NSColor.systemGray.withAlphaComponent(0.45).setFill()
-        NSBezierPath(
-            roundedRect: NSRect(x: 0, y: y, width: width, height: height),
-            xRadius: height / 2,
-            yRadius: height / 2
-        ).fill()
-        if fraction > 0 {
-            color.setFill()
-            NSBezierPath(
-                roundedRect: NSRect(x: 0, y: y, width: max(height, width * fraction), height: height),
-                xRadius: height / 2,
-                yRadius: height / 2
-            ).fill()
-        }
     }
 }

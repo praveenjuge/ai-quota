@@ -27,7 +27,7 @@ Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`;
   - Muse: `~/.config/muse/auth.json` or Keychain `ai.meta.dev.credentials/meta` → `POST api.meta.ai/muse-code/key` (minted key is discarded)
 - Keychain is read via the `/usr/bin/security` subprocess (stable attribution, so one Always Allow sticks), blobs are cached in memory, and background refreshes never prompt.
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.
-- Menu rows are stock `NSMenuItem`s; each bar is a bar-only `NSView` that stretches to the full menu width, so bars span edge to edge under the key-hint column.
+- Menu rows are stock `NSMenuItem`s; each quota bar uses a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text.
 
 ## Releases
 
