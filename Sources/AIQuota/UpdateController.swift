@@ -108,7 +108,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate, SPUUserDriver {
             return
         }
         install = { reply(.install) }
-        set(state.stage == .notDownloaded ? "Download update…" : "Restart and update", enabled: true)
+        set(state.stage == .notDownloaded ? "Download update…" : "Install update…", enabled: true)
     }
 
     func showUpdateReleaseNotes(with downloadData: SPUDownloadData) {}

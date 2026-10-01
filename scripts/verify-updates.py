@@ -33,13 +33,28 @@ class Server(http.server.ThreadingHTTPServer):
 
 
 def scenario(source, action):
-    output = run('bash', 'scripts/prepare-update-e2e.sh', source)
+    version = {'equal': '0.1.2', 'older': '0.1.1'}.get(action, '0.1.3')
+    output = run('bash', 'scripts/prepare-update-e2e.sh', source, version)
     root = pathlib.Path(output.strip().splitlines()[-1])
     app = root / 'installed/AIQuota.app'
     info = app / 'Contents/Info.plist'
     identifier = plistlib.loads(info.read_bytes())['CFBundleIdentifier']
-    handler = lambda *args, **kwargs: http.server.SimpleHTTPRequestHandler(
-        *args, directory=str(root / 'feed'), **kwargs)
+    class Handler(http.server.SimpleHTTPRequestHandler):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, directory=str(root / 'feed'), **kwargs)
+
+        def do_GET(self):
+            if action == 'offline':
+                self.send_error(503)
+            elif action == 'interrupted' and self.path.endswith('.zip'):
+                self.send_response(200)
+                self.send_header('Content-Length', '10000000')
+                self.end_headers()
+                self.wfile.write(b'incomplete')
+                self.close_connection = True
+            else:
+                super().do_GET()
+    handler = Handler
     server = Server(('127.0.0.1', 18765), handler)
     threading.Thread(target=server.serve_forever, daemon=True).start()
     if action == 'invalid-feed':
@@ -78,7 +93,8 @@ def scenario(source, action):
             text = tree()
             ref = re.findall(r'\[(e\d+)\] (?:menuitem|button) "Check for updates…"', text)[-1]
             run('interceptor', 'macos', 'act', ref)
-            wait_for(lambda: 'Update failed — retry' in tree())
+            expected_title = 'You’re up to date' if action in ('equal', 'older') else 'Update failed — retry'
+            wait_for(lambda: expected_title in tree())
             assert plistlib.loads(info.read_bytes())['CFBundleVersion'] == '0.1.2'
             assert process.poll() is None
         return {'scenario': action, 'result': 'passed', 'artifacts': str(root)}
@@ -96,7 +112,7 @@ def scenario(source, action):
 if __name__ == '__main__':
     source = sys.argv[1]
     results = []
-    for action in sys.argv[2:] or ['restart', 'quit', 'invalid-feed', 'malformed-feed', 'invalid-archive']:
+    for action in sys.argv[2:] or ['restart', 'quit', 'invalid-feed', 'malformed-feed', 'invalid-archive', 'equal', 'older', 'offline', 'interrupted']:
         result = scenario(source, action)
         results.append(result)
         print(json.dumps(result), flush=True)
