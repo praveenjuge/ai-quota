@@ -18,6 +18,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var statusMenu: StatusMenu?
     private var store = UsageStore()
     private var refreshTimer: Timer?
+    private let updater = UpdateController()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -41,6 +42,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
 
         let statusMenu = StatusMenu(
             store: store,
+            updater: UpdateController.isAvailable ? updater : nil,
             onSettings: {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -49,6 +51,8 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         )
         self.statusMenu = statusMenu
         item.menu = statusMenu.menu
+        updater.onChange = { [weak statusMenu] in statusMenu?.updateUpdateItem() }
+        updater.start()
 
         refreshTimer = Timer.scheduledTimer(withTimeInterval: UsageStore.refreshInterval, repeats: true) { [weak self] _ in
             guard let self else { return }

@@ -3,3 +3,5 @@ dist/
 .DS_Store
 *.xcuserdata/
 DerivedData/
+
+__pycache__/

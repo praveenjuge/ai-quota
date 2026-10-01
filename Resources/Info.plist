@@ -11,12 +11,28 @@
     <key>CFBundlePackageType</key>
     <string>APPL</string>
     <key>CFBundleShortVersionString</key>
-    <string>1.0</string>
+    <string>0.1.2</string>
     <key>CFBundleVersion</key>
-    <string>1</string>
+    <string>0.1.2</string>
     <key>LSMinimumSystemVersion</key>
     <string>14.0</string>
     <key>LSUIElement</key>
+    <true/>
+    <key>SUPublicEDKey</key>
+    <string>CqwxRlDOfL1txR/CL2TdHUiKSIldQz+GSQQzIfQsZYM=</string>
+    <key>SUFeedURL</key>
+    <string>https://github.com/praveenjuge/ai-quota/releases/latest/download/appcast.xml</string>
+    <key>SUEnableAutomaticChecks</key>
+    <true/>
+    <key>SUAutomaticallyUpdate</key>
+    <true/>
+    <key>SUScheduledCheckInterval</key>
+    <integer>21600</integer>
+    <key>SUSendProfileInfo</key>
+    <false/>
+    <key>SURequireSignedFeed</key>
+    <true/>
+    <key>SUVerifyUpdateBeforeExtraction</key>
     <true/>
 </dict>
 </plist>

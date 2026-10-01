@@ -7,11 +7,17 @@ import AppKit
 final class StatusMenu: NSObject, NSMenuDelegate {
     let menu = NSMenu()
     private let store: UsageStore
+    private let updater: UpdateController?
+    private var updateItem: NSMenuItem?
+    private var refreshItem: NSMenuItem?
+    private var refreshView: MenuActionView?
+    private var updateView: MenuActionView?
     private let onSettings: () -> Void
     private let onQuit: () -> Void
 
-    init(store: UsageStore, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void) {
+    init(store: UsageStore, updater: UpdateController?, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void) {
         self.store = store
+        self.updater = updater
         self.onSettings = onSettings
         self.onQuit = onQuit
         super.init()
@@ -39,10 +45,28 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         }
         let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
+        let refreshView = MenuActionView(title: store.isRefreshing ? "Refreshing…" : "Refresh", width: barWidth) { [weak self] in
+            self?.refreshNow(nil)
+        }
+        refreshView.update(title: store.isRefreshing ? "Refreshing…" : "Refresh", enabled: !store.isRefreshing)
+        refresh.view = refreshView
+        self.refreshView = refreshView
+        refreshItem = refresh
         menu.addItem(refresh)
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         menu.addItem(settings)
+        if let updater {
+            let item = NSMenuItem(title: updater.title, action: #selector(updateApp), keyEquivalent: "")
+            item.target = self
+            item.isEnabled = updater.enabled
+            updateItem = item
+            let view = MenuActionView(title: updater.title, width: barWidth) { [weak self] in self?.updateApp(nil) }
+            item.view = view
+            updateView = view
+            view.update(title: updater.title, enabled: updater.enabled)
+            menu.addItem(item)
+        }
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit AIQuota", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
@@ -55,6 +79,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             await store.refresh(userInitiated: true)
             self.rebuild()
         }
+    }
+
+    func updateUpdateItem() {
+        updateItem?.title = updater?.title ?? ""
+        updateItem?.isEnabled = updater?.enabled ?? false
+        updateView?.update(title: updater?.title ?? "", enabled: updater?.enabled ?? false)
+    }
+
+    @objc private func updateApp(_ sender: Any?) {
+        if updater?.title == "Restart and update" { menu.cancelTracking() }
+        updater?.activate()
     }
 
     // MARK: - Sections
@@ -174,7 +209,13 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func noop(_ sender: Any?) {}
 
     @objc private func refreshNow(_ sender: Any?) {
-        Task { await store.refresh(userInitiated: true) }
+        guard !store.isRefreshing else { return }
+        refreshItem?.title = "Refreshing…"
+        refreshView?.update(title: "Refreshing…", enabled: false)
+        Task {
+            await store.refresh(userInitiated: true)
+            self.rebuild()
+        }
     }
 
     @objc private func openSettings(_ sender: Any?) {

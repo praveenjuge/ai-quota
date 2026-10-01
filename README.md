@@ -16,11 +16,11 @@ swift build                                    # debug build
 open dist/AIQuota.app
 ```
 
-Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`; when the identity isn't on the keychain it falls back to an ad-hoc signature.
+Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `build-app.sh`. Release bundles require a valid signing identity.
 
 ## How it works
 
-- Pure Swift/SwiftUI + AppKit, no dependencies. `LSUIElement` accessory app.
+- Swift/SwiftUI + AppKit, with Sparkle for updates. `LSUIElement` accessory app.
 - Reuses CLI logins read-only; tokens are never refreshed or written back.
   - Codex: `~/.codex/auth.json` → `GET chatgpt.com/backend-api/wham/usage`
   - Claude: Keychain `Claude Code-credentials` (fallback: `~/.claude/.credentials.json`) → `GET api.anthropic.com/api/oauth/usage`
@@ -54,3 +54,50 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific passwo
 ## Settings
 
 Provider toggles, launch at login (`SMAppService`), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `keychainApproved`).
+
+## Automatic updates
+
+Release `.app` bundles use Sparkle 2.10.0. They check at startup and every six
+hours, download verified updates in the background, and show update status below
+Settings. Choose **Restart and update**, or quit normally to install for the next
+launch. Debug builds and `--dump-usage` do not start the updater. No credentials or
+system profile are sent to the update feed.
+
+Only the stable GitHub release marked **Latest** is offered. Each release includes
+a signed `appcast.xml` and a signed, notarized ARM64 ZIP; equal or older versions
+are ignored. Existing installations without Sparkle need one manual upgrade.
+
+`bash build-app.sh 0.1.3` sets both bundle version fields. Omit the argument to use
+the nearest release tag. Builds require the Developer ID signing identity and a
+fresh output path; set `APP_OUTPUT` to retain an existing bundle. Local and CI
+bundles use the same assembler, including Sparkle framework/helper signing.
+
+The update key is stored in the login Keychain under the `ai-quota` account.
+CI also requires `SPARKLE_PRIVATE_KEY`. Its public key is in `Resources/Info.plist`.
+Never commit or log the private key. To restore CI access from this Mac:
+
+```sh
+security find-generic-password -a ai-quota -s https://sparkle-project.org -w \
+  | gh secret set SPARKLE_PRIVATE_KEY --repo praveenjuge/ai-quota
+```
+
+CI generates and signs the feed after notarization, uploads all four assets to a
+draft release, verifies the asset list, then publishes it as Latest. The app
+requires a signed feed and verifies archive signatures before extraction.
+
+### Verify updates locally
+
+```sh
+APP_OUTPUT=dist/e2e-source/AIQuota.app bash build-app.sh 0.1.3
+python3 scripts/verify-updates.py dist/e2e-source/AIQuota.app
+```
+
+This requires Interceptor with Accessibility permission and the Keychain update
+key. It prepares signed app copies with unique test identities, uses a localhost
+signed feed, and checks clicked restart, normal Quit, preference preservation,
+and rejection of invalid feeds/archives. Results are saved in
+`dist/verification/update-e2e.json`; each result links retained menu trees and
+app logs. Production apps and preferences are untouched.
+
+Refresh and Check for updates use embedded native buttons so clicking them keeps
+the status menu open. Refresh shows **Refreshing…** until the new data arrives.

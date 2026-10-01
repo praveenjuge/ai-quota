@@ -29,8 +29,10 @@ jobs:
           P12_PASSWORD: ${{ secrets.APPLE_DEVELOPER_CERTIFICATE_PASSWORD }}
           APPLE_ID: ${{ secrets.APPLE_ID }}
           APP_SPECIFIC: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+          SPARKLE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
         run: |
           missing=""
+          [ -z "$SPARKLE_KEY" ] && missing="$missing SPARKLE_PRIVATE_KEY"
           [ -z "$P12" ] && missing="$missing APPLE_DEVELOPER_CERTIFICATE_P12_BASE64"
           [ -z "$P12_PASSWORD" ] && missing="$missing APPLE_DEVELOPER_CERTIFICATE_PASSWORD"
           [ -z "$APPLE_ID" ] && missing="$missing APPLE_ID"
@@ -107,26 +109,11 @@ jobs:
           echo "INSTALLER_IDENTITY=$installer_identity" >> "$GITHUB_ENV"
           echo "installer identity: ${installer_identity:-none}"
 
-      - name: Build
-        run: |
-          set -euo pipefail
-          swift build -c release --arch arm64
-
-      - name: Assemble and sign app
+      - name: Build, assemble and sign app
         env:
           VERSION: ${{ steps.version.outputs.version }}
-        run: |
-          set -euo pipefail
-          app="dist/AIQuota.app"
-          rm -rf dist
-          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
-          cp .build/release/AIQuota "$app/Contents/MacOS/AIQuota"
-          cp Resources/Info.plist "$app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $VERSION" "$app/Contents/Info.plist"
-          /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${{ github.run_number }}" "$app/Contents/Info.plist"
-          codesign --force --deep --options runtime --timestamp \
-            --sign "$APP_IDENTITY" "$app"
-          codesign --verify --strict --verbose "$app"
+          CODESIGN_IDENTITY: ${{ env.APP_IDENTITY }}
+        run: bash build-app.sh "$VERSION"
 
       - name: Notarize app and make ZIP
         env:
@@ -143,6 +130,12 @@ jobs:
           spctl --assess --type execute --verbose dist/AIQuota.app
           ditto -c -k --sequesterRsrc --keepParent dist/AIQuota.app \
             "dist/AIQuota-$VERSION-arm64.zip"
+
+      - name: Sign update and generate feed
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          SPARKLE_PRIVATE_KEY: ${{ secrets.SPARKLE_PRIVATE_KEY }}
+        run: bash scripts/make-appcast.sh "$VERSION"
 
       - name: Make notarized DMG
         env:
@@ -226,7 +219,14 @@ jobs:
           if [ -z "$INSTALLER_IDENTITY" ]; then
             notes="$notes The PKG is unsigned; use ZIP or DMG for Gatekeeper-approved installation."
           fi
-          gh release create "v$VERSION" --title "v$VERSION" --generate-notes --notes "$notes" \
+          gh release create "v$VERSION" --draft --title "v$VERSION" --generate-notes --notes "$notes" \
             "dist/AIQuota-$VERSION-arm64.zip" \
             "dist/AIQuota-$VERSION-arm64.dmg" \
-            "dist/AIQuota-$VERSION-arm64.pkg"
+            "dist/AIQuota-$VERSION-arm64.pkg" \
+            dist/appcast.xml
+          gh release view "v$VERSION" --json assets --jq '[.assets[].name] | length == 4' | grep -qx true
+          verification=$(mktemp -d "$RUNNER_TEMP/release-verification.XXXXXX")
+          gh release download "v$VERSION" --pattern appcast.xml --pattern "AIQuota-$VERSION-arm64.zip" --dir "$verification"
+          cmp dist/appcast.xml "$verification/appcast.xml"
+          cmp "dist/AIQuota-$VERSION-arm64.zip" "$verification/AIQuota-$VERSION-arm64.zip"
+          gh release edit "v$VERSION" --draft=false --latest
