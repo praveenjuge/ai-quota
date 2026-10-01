@@ -16,7 +16,7 @@ swift build                                    # debug build
 open dist/AIQuota.app
 ```
 
-Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`.
+Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`; when the identity isn't on the keychain it falls back to an ad-hoc signature.
 
 ## How it works
 

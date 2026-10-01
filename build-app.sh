@@ -14,7 +14,12 @@ mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/AIQuota "$APP/Contents/MacOS/AIQuota"
 cp Resources/Info.plist "$APP/Contents/Info.plist"
 
-codesign --force --deep --options runtime --timestamp \
-    --sign "$IDENTITY" "$APP"
-codesign --verify --strict "$APP" && echo "signed OK"
+if codesign --force --deep --options runtime --timestamp \
+    --sign "$IDENTITY" "$APP" 2>/dev/null; then
+    codesign --verify --strict "$APP" && echo "signed OK ($IDENTITY)"
+else
+    echo "note: '$IDENTITY' unavailable, falling back to ad-hoc signature"
+    codesign --force --deep --sign - "$APP"
+    codesign --verify "$APP" && echo "signed OK (ad-hoc)"
+fi
 echo "built: $APP"
