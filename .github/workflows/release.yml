@@ -170,7 +170,15 @@ jobs:
         run: |
           set -euo pipefail
           pkg="dist/AIQuota-$VERSION-arm64.pkg"
-          pkgbuild --component dist/AIQuota.app \
+          staging="$RUNNER_TEMP/pkg-root"
+          components="$RUNNER_TEMP/pkg-components.plist"
+          mkdir -p "$staging"
+          ditto dist/AIQuota.app "$staging/AIQuota.app"
+          pkgbuild --analyze --root "$staging" "$components"
+          /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$components"
+          /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$components"
+          pkgbuild --root "$staging" --component-plist "$components" \
+            --identifier com.praveenjuge.ai-quota \
             --install-location /Applications \
             --version "$VERSION" "$pkg"
           if [ -n "$INSTALLER_IDENTITY" ]; then
@@ -184,6 +192,19 @@ jobs:
           else
             echo "::warning::PKG contains the notarized app but is unsigned; a Developer ID Installer certificate is required for Gatekeeper-approved installation."
           fi
+
+      - name: Verify PKG installation and launch
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          set -euo pipefail
+          sudo installer -pkg "dist/AIQuota-$VERSION-arm64.pkg" -target /
+          installed="/Applications/AIQuota.app"
+          cmp dist/AIQuota.app/Contents/MacOS/AIQuota "$installed/Contents/MacOS/AIQuota"
+          installed_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$installed/Contents/Info.plist")
+          [ "$installed_version" = "$VERSION" ]
+          codesign --verify --strict --verbose "$installed"
+          "$installed/Contents/MacOS/AIQuota" --dump-usage
 
       - name: Clean up signing material
         if: always()
