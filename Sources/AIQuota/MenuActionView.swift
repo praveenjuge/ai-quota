@@ -7,7 +7,7 @@ final class MenuActionView: NSView {
     private let button = NSButton()
     private let action: () -> Void
 
-    init(title: String, width: CGFloat, action: @escaping () -> Void) {
+    init(title: String, width: CGFloat, detail: String? = nil, action: @escaping () -> Void) {
         self.action = action
         super.init(frame: NSRect(x: 0, y: 0, width: width, height: 24))
         autoresizingMask = [.width]
@@ -20,6 +20,17 @@ final class MenuActionView: NSView {
         button.target = self
         button.action = #selector(activate)
         addSubview(button)
+        if let detail {
+            let label = NSTextField(labelWithString: detail)
+            label.font = NSFont.menuFont(ofSize: NSFont.systemFontSize)
+            label.textColor = .secondaryLabelColor
+            label.alignment = .right
+            label.sizeToFit()
+            label.frame.origin = NSPoint(x: width - 16 - label.frame.width, y: (bounds.height - label.frame.height) / 2)
+            label.autoresizingMask = [.minXMargin]
+            button.frame.size.width = max(0, label.frame.minX - 24)
+            addSubview(label)
+        }
         update(title: title, enabled: true)
     }
 

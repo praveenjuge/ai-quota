@@ -36,18 +36,18 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let enabled = ProviderID.allCases.filter { SettingsStore.isEnabled($0) }
         // Match the menu width while keeping capacity indicators inset
         // from the edges of their full-width menu-item views.
-        let barWidth = measureBarWidth(enabled: enabled)
+        let refreshDetail = store.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" }
+        let refreshWidth = (("Refreshing…" + (refreshDetail ?? "")) as NSString)
+            .size(withAttributes: [.font: NSFont.menuFont(ofSize: NSFont.systemFontSize)]).width + 40
+        let barWidth = max(measureBarWidth(enabled: enabled), refreshWidth)
         for (index, id) in enabled.enumerated() {
             if index > 0 { renderedMenu.addItem(.separator()) }
             addSection(for: id, barWidth: barWidth)
         }
         renderedMenu.addItem(.separator())
-        if let last = store.lastRefresh {
-            renderedMenu.addItem(info("Updated \(last.formatted(date: .omitted, time: .shortened))", dimmed: true))
-        }
         let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
-        let refreshView = MenuActionView(title: store.isRefreshing ? "Refreshing…" : "Refresh", width: barWidth) { [weak self] in
+        let refreshView = MenuActionView(title: store.isRefreshing ? "Refreshing…" : "Refresh", width: barWidth, detail: refreshDetail) { [weak self] in
             self?.refreshNow(nil)
         }
         refreshView.update(title: store.isRefreshing ? "Refreshing…" : "Refresh", enabled: !store.isRefreshing)

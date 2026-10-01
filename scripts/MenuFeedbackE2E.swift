@@ -68,7 +68,17 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
             click("Refresh")
         case 1:
             guard status.menu.items.contains(where: { $0.title == "Refresh" }) else { return }
+            guard let row = status.menu.items.first(where: { $0.title == "Refresh" }),
+                  let label = row.view?.subviews.compactMap({ $0 as? NSTextField }).first,
+                  label.stringValue.hasPrefix("Updated "),
+                  let button = row.view?.subviews.first as? NSButton,
+                  button.frame.maxX + 8 <= label.frame.minX,
+                  !status.menu.items.contains(where: { $0.title.hasPrefix("Updated ") }) else {
+                fail("refresh and timestamp must share one row without overlap")
+                return
+            }
             guard updater.enabled else { return }
+            print("PASS: Refresh and timestamp share one row without overlap")
             print("PASS: Refresh keeps menu tracking")
             stage = 2
             click("Check for updates…")
