@@ -36,6 +36,7 @@ framework=".build/artifacts/sparkle/Sparkle/Sparkle.xcframework/macos-arm64_x86_
 mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" "$app/Contents/Frameworks"
 cp "$bin/AIQuota" "$app/Contents/MacOS/AIQuota"
 cp Resources/Info.plist "$app/Contents/Info.plist"
+cp Resources/AppIcon.icns "$app/Contents/Resources/AppIcon.icns"
 ditto "$framework" "$app/Contents/Frameworks/Sparkle.framework"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $version" "$app/Contents/Info.plist"
 # Use the semantic version for both comparison fields, including local builds.
