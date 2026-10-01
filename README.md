@@ -31,7 +31,7 @@ Set `CODESIGN_IDENTITY` to override the signing identity used by `build-app.sh`;
 
 ## Releases
 
-Every push to `main` builds on Apple Silicon runners, bumps the patch version tag (`v0.1.0`, `v0.1.1`, …), and publishes a signed + notarized release with `.zip`, `.dmg`, and `.pkg` artifacts. The tag is created only after a successful build, so failed runs never burn a version number.
+Every push to `main` builds on Apple Silicon runners, bumps the patch version tag (`v0.1.0`, `v0.1.1`, …), and publishes `.zip`, `.dmg`, and `.pkg` artifacts. The app and DMG are signed and notarized. The PKG is signed and notarized only when a Developer ID Installer certificate is configured; otherwise it contains the notarized app but is unsigned and does not pass Gatekeeper's installer assessment. The tag is created only after successful packaging.
 
 CI needs these repository secrets (`gh secret set NAME --repo praveenjuge/ai-quota`):
 

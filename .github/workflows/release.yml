@@ -16,9 +16,10 @@ permissions:
 jobs:
   release:
     runs-on: macos-15 # Apple Silicon
+    timeout-minutes: 90
     steps:
       - name: Check out
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           fetch-depth: 0
 
@@ -70,8 +71,8 @@ jobs:
           set -euo pipefail
           keychain="$RUNNER_TEMP/app-signing.keychain-db"
           keychain_password=$(openssl rand -base64 32)
+          echo "::add-mask::$keychain_password"
           echo "KEYCHAIN_PATH=$keychain" >> "$GITHUB_ENV"
-          echo "KEYCHAIN_PASSWORD=$keychain_password" >> "$GITHUB_ENV"
           security create-keychain -p "$keychain_password" "$keychain"
           security set-keychain-settings -lut 21600 "$keychain"
           security unlock-keychain -p "$keychain_password" "$keychain"
@@ -93,12 +94,16 @@ jobs:
           security set-key-partition-list -S apple-tool:,apple:,codesign: \
             -s -k "$keychain_password" "$keychain"
           app_identity=$(security find-identity -v -p codesigning "$keychain" \
-            | grep 'Developer ID Application' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/')
+            | grep 'Developer ID Application:.*(LW385M78LW)' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
           [ -n "$app_identity" ] || { echo "::error::no Developer ID Application identity found"; exit 1; }
           echo "APP_IDENTITY=$app_identity" >> "$GITHUB_ENV"
           echo "app identity: $app_identity"
-          installer_identity=$(security find-identity -v -p codesigning "$keychain" \
-            | grep 'Developer ID Installer' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+          installer_identity=$(security find-identity -v "$keychain" \
+            | grep 'Developer ID Installer:.*(LW385M78LW)' | head -n 1 | sed -E 's/.*"([^"]+)".*/\1/' || true)
+          if [ -n "$INSTALLER_P12_B64" ] && [ -z "$installer_identity" ]; then
+            echo "::error::Installer P12 has no valid Developer ID Installer identity for LW385M78LW"
+            exit 1
+          fi
           echo "INSTALLER_IDENTITY=$installer_identity" >> "$GITHUB_ENV"
           echo "installer identity: ${installer_identity:-none}"
 
@@ -132,10 +137,10 @@ jobs:
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent \
             dist/AIQuota.app "$RUNNER_TEMP/notarize.zip"
-          xcrun notarytool submit "$RUNNER_TEMP/notarize.zip" \
-            --apple-id "$APPLE_ID" --password "$APP_SPECIFIC" \
-            --team-id LW385M78LW --wait
+          bash scripts/notarize.sh "$RUNNER_TEMP/notarize.zip"
           xcrun stapler staple dist/AIQuota.app
+          xcrun stapler validate dist/AIQuota.app
+          spctl --assess --type execute --verbose dist/AIQuota.app
           ditto -c -k --sequesterRsrc --keepParent dist/AIQuota.app \
             "dist/AIQuota-$VERSION-arm64.zip"
 
@@ -146,12 +151,16 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          hdiutil create -volname "AIQuota" -srcfolder dist/AIQuota.app \
+          staging="$RUNNER_TEMP/dmg"
+          mkdir -p "$staging"
+          ditto dist/AIQuota.app "$staging/AIQuota.app"
+          ln -s /Applications "$staging/Applications"
+          hdiutil create -volname "AIQuota" -srcfolder "$staging" \
             -ov -format UDZO "dist/AIQuota-$VERSION-arm64.dmg"
-          xcrun notarytool submit "dist/AIQuota-$VERSION-arm64.dmg" \
-            --apple-id "$APPLE_ID" --password "$APP_SPECIFIC" \
-            --team-id LW385M78LW --wait
+          codesign --sign "$APP_IDENTITY" --timestamp "dist/AIQuota-$VERSION-arm64.dmg"
+          bash scripts/notarize.sh "dist/AIQuota-$VERSION-arm64.dmg"
           xcrun stapler staple "dist/AIQuota-$VERSION-arm64.dmg"
+          xcrun stapler validate "dist/AIQuota-$VERSION-arm64.dmg"
 
       - name: Make PKG
         env:
@@ -167,14 +176,22 @@ jobs:
           if [ -n "$INSTALLER_IDENTITY" ]; then
             productsign --sign "$INSTALLER_IDENTITY" "$pkg" "$pkg.signed"
             mv "$pkg.signed" "$pkg"
-            xcrun notarytool submit "$pkg" \
-              --apple-id "$APPLE_ID" --password "$APP_SPECIFIC" \
-              --team-id LW385M78LW --wait
+            pkgutil --check-signature "$pkg"
+            bash scripts/notarize.sh "$pkg"
             xcrun stapler staple "$pkg"
+            xcrun stapler validate "$pkg"
             echo "PKG signed and notarized"
           else
-            echo "PKG unsigned (no installer certificate) — users right-click → Open to install"
+            echo "::warning::PKG contains the notarized app but is unsigned; a Developer ID Installer certificate is required for Gatekeeper-approved installation."
           fi
+
+      - name: Clean up signing material
+        if: always()
+        run: |
+          if [ -n "${KEYCHAIN_PATH:-}" ] && [ -f "$KEYCHAIN_PATH" ]; then
+            security delete-keychain "$KEYCHAIN_PATH"
+          fi
+          rm -f "$RUNNER_TEMP/app-cert.p12" "$RUNNER_TEMP/installer-cert.p12"
 
       - name: Tag and release
         env:
@@ -184,7 +201,11 @@ jobs:
           set -euo pipefail
           git tag "v$VERSION"
           git push origin "v$VERSION"
-          gh release create "v$VERSION" --title "v$VERSION" --generate-notes \
+          notes="macOS 14 or later, Apple Silicon. ZIP and DMG contain the signed, notarized app."
+          if [ -z "$INSTALLER_IDENTITY" ]; then
+            notes="$notes The PKG is unsigned; use ZIP or DMG for Gatekeeper-approved installation."
+          fi
+          gh release create "v$VERSION" --title "v$VERSION" --generate-notes --notes "$notes" \
             "dist/AIQuota-$VERSION-arm64.zip" \
             "dist/AIQuota-$VERSION-arm64.dmg" \
             "dist/AIQuota-$VERSION-arm64.pkg"
