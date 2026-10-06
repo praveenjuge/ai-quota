@@ -202,7 +202,11 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             let m = Int(remaining.truncatingRemainder(dividingBy: 3600) / 60)
             return m == 0 ? "resets in \(h)h" : "resets in \(h)h \(m)m"
         }
-        return "resets in \(Int(remaining / 86400))d"
+        // Longer windows read better as a calendar moment ("resets Sat 3:30 AM"),
+        // matching the Claude desktop app.
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate(remaining < 6 * 86400 ? "EEE jmm" : "MMM d jmm")
+        return "resets \(formatter.string(from: date))"
     }
 
     private static func barColor(forRemaining remaining: Double) -> NSColor {

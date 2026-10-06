@@ -79,8 +79,20 @@ enum ClaudeProvider {
             return snap
         }
         snap.plan = credential.plan
-        snap.session = window(JSON.dict(body["five_hour"]))
-        snap.weekly = window(JSON.dict(body["seven_day"]))
+        // Newer responses describe every quota in `limits` (the shape the
+        // Claude desktop app renders, including model-scoped weekly rows
+        // such as "Weekly · Fable"); older ones only carry the fixed
+        // five_hour / seven_day windows.
+        if !applyLimits(body["limits"], to: &snap) {
+            snap.session = window(JSON.dict(body["five_hour"]))
+            snap.weekly = window(JSON.dict(body["seven_day"]))
+            for (key, model) in [("seven_day_opus", "Opus"), ("seven_day_sonnet", "Sonnet")] {
+                let scoped = window(JSON.dict(body[key]))
+                if scoped.usedPercent != nil {
+                    snap.extraRows.append(ExtraRow(label: "Weekly · \(model)", window: scoped))
+                }
+            }
+        }
         // Enterprise seats report no session/weekly windows; the monthly
         // extra-usage spend is the quota signal that actually exists.
         if let extra = JSON.dict(body["extra_usage"]),
@@ -92,6 +104,51 @@ enum ClaudeProvider {
         }
         snap.fetchedAt = Date()
         return snap
+    }
+
+    /// Maps the `limits` array onto the snapshot: the session row and the
+    /// unscoped weekly row take the fixed slots; scoped weekly rows (per
+    /// model or surface) and unknown groups become labelled extra rows in
+    /// the order the API lists them. Returns false when no usable entry
+    /// exists so the caller can fall back to the legacy windows.
+    static func applyLimits(_ value: Any?, to snap: inout ProviderSnapshot) -> Bool {
+        guard let limits = value as? [[String: Any]] else { return false }
+        var applied = false
+        for limit in limits {
+            guard let percent = JSON.number(limit["percent"]) else { continue }
+            let window = UsageWindow(usedPercent: min(100, max(0, percent)),
+                                     resetsAt: JSON.date(limit["resets_at"]))
+            let group = JSON.text(limit["group"]) ?? JSON.text(limit["kind"]) ?? "Other"
+            let scopeLabel = scopeText(JSON.dict(limit["scope"]))
+            applied = true
+            switch (group, scopeLabel) {
+            case ("session", nil) where snap.session.usedPercent == nil:
+                snap.session = window
+            case ("weekly", nil) where snap.weekly.usedPercent == nil:
+                snap.weekly = window
+            default:
+                let base = group.prefix(1).uppercased() + group.dropFirst()
+                let label = scopeLabel.map { "\(base) · \($0)" } ?? base
+                snap.extraRows.append(ExtraRow(label: label, window: window))
+            }
+        }
+        return applied
+    }
+
+    private static func scopeText(_ scope: [String: Any]?) -> String? {
+        guard let scope else { return nil }
+        var parts: [String] = []
+        if let model = JSON.dict(scope["model"]),
+           let name = JSON.text(model["display_name"]) ?? JSON.text(model["id"]) {
+            parts.append(name)
+        }
+        if let surface = JSON.dict(scope["surface"]),
+           let name = JSON.text(surface["display_name"]) ?? JSON.text(surface["id"]) {
+            parts.append(name)
+        } else if let surface = JSON.text(scope["surface"]) {
+            parts.append(surface)
+        }
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
     }
 
     private static func window(_ value: [String: Any]?) -> UsageWindow {
