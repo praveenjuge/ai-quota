@@ -59,3 +59,27 @@ private struct ProviderToggle: View {
         Toggle(id.displayName, isOn: $isOn)
     }
 }
+
+/// The one Settings window, created on first use and reused after.
+@MainActor
+final class SettingsWindow {
+    private var window: NSWindow?
+
+    func show() {
+        let window = self.window ?? makeWindow()
+        self.window = window
+        NSApp.activate()
+        window.makeKeyAndOrderFront(nil)
+    }
+
+    private func makeWindow() -> NSWindow {
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+        window.title = "AIQuota Settings"
+        window.styleMask = [.titled, .closable]
+        window.isReleasedWhenClosed = false
+        // Open on the Space the menu was used from, even over a full-screen app.
+        window.collectionBehavior = [.moveToActiveSpace, .fullScreenAuxiliary]
+        window.center()
+        return window
+    }
+}

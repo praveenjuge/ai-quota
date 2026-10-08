@@ -1,8 +1,16 @@
 import Foundation
+import LocalAuthentication
+import Security
 
 enum KeychainError: Error, Sendable {
     case notFound
     case accessDenied
+}
+
+/// A generic-password item's public attributes; never its secret.
+struct KeychainItem: Sendable, Equatable {
+    var service: String
+    var modified: Date
 }
 
 /// Read-only Keychain access through the /usr/bin/security subprocess (the
@@ -24,6 +32,35 @@ enum Keychain {
                 continuation.resume(with: Result { try readBlocking(service: service, account: account, timeout: timeout) })
             }
         }
+    }
+
+    /// Lists generic-password items whose service starts with `servicePrefix`,
+    /// newest modification first. Attributes only — no secret is decrypted,
+    /// so this never shows an approval prompt and is safe in the background.
+    static func items(servicePrefix: String, account: String) -> [KeychainItem] {
+        let context = LAContext()
+        context.interactionNotAllowed = true
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrAccount as String: account,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecUseAuthenticationContext as String: context,
+        ]
+        var result: CFTypeRef?
+        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
+              let rows = result as? [[String: Any]] else { return [] }
+        var newest: [String: Date] = [:]
+        for row in rows {
+            guard let service = row[kSecAttrService as String] as? String,
+                  service.hasPrefix(servicePrefix) else { continue }
+            let modified = row[kSecAttrModificationDate as String] as? Date
+                ?? row[kSecAttrCreationDate as String] as? Date
+                ?? .distantPast
+            newest[service] = max(newest[service] ?? .distantPast, modified)
+        }
+        return newest.map { KeychainItem(service: $0.key, modified: $0.value) }
+            .sorted { $0.modified > $1.modified }
     }
 
     private static func readBlocking(service: String, account: String, timeout: TimeInterval) throws -> Data? {

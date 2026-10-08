@@ -23,7 +23,7 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
 - Swift/SwiftUI + AppKit, with Sparkle for updates. `LSUIElement` accessory app.
 - Reuses CLI logins read-only; tokens are never refreshed or written back.
   - Codex: `~/.codex/auth.json` → `GET chatgpt.com/backend-api/wham/usage`
-  - Claude: Keychain `Claude Code-credentials` (fallback: `~/.claude/.credentials.json`) → `GET api.anthropic.com/api/oauth/usage`
+  - Claude: newest valid Keychain `Claude Code-credentials` item, including the `-<hash>` items Claude Code keeps per config folder (such as the Claude desktop app's), then `~/.claude/.credentials.json` → `GET api.anthropic.com/api/oauth/usage`. Tokens are never refreshed, so Claude Code's own logins are never rotated out from under it.
   - Muse: `~/.config/muse/auth.json` or Keychain `ai.meta.dev.credentials/meta` → `POST api.meta.ai/muse-code/key` (minted key is discarded)
 - Keychain is read via the `/usr/bin/security` subprocess (stable attribution, so one Always Allow sticks), blobs are cached in memory, and background refreshes never prompt.
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.

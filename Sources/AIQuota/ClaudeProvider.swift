@@ -1,17 +1,33 @@
+import CryptoKit
 import Foundation
 
-/// Claude: reuses the Claude Code login — macOS Keychain first (Claude Code's
-/// source of truth), then ~/.claude/.credentials.json, then
-/// $CLAUDE_CONFIG_DIR variants — and calls the OAuth usage endpoint.
-/// Read-only: tokens are never refreshed or written back.
+/// Claude: reuses a Claude Code login and calls the OAuth usage endpoint.
+/// Claude Code keeps one Keychain item per config directory
+/// ("Claude Code-credentials" plus "-<hash>" variants, e.g. the one the
+/// Claude desktop app's Code tab uses), so every item is considered, newest
+/// first, then ~/.claude/.credentials.json.
+/// Read-only: tokens are never refreshed or written back, because a
+/// refresh rotates the refresh token and would sign Claude Code out.
 enum ClaudeProvider {
     static let id = ProviderID.claude
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1")!
+    private static let keychainService = "Claude Code-credentials"
+    private static let approvalMessage = "Keychain approval needed — click Refresh, then choose Always Allow."
 
     struct Credential {
         var accessToken: String
         var expiresAtMs: Double?
+        var scopes: [String]?
         var plan: String?
+    }
+
+    /// What the credential search found, so the menu can tell "never signed
+    /// in" apart from "signed in, but every token has lapsed".
+    enum Lookup {
+        case found(Credential)
+        case expired
+        case mcpOnly
+        case missing
     }
 
     static func fetch(allowKeychainPrompt: Bool) async -> ProviderSnapshot {
@@ -20,49 +36,61 @@ enum ClaudeProvider {
                                     state: .ok, fetchedAt: nil)
         let approved: Bool = await MainActor.run { SettingsStore.keychainApproved }
         let keychainGated = !(allowKeychainPrompt || approved)
-        let credential: Credential
-        do {
-            guard let found = try await loadCredential(mayTouchKeychain: !keychainGated,
-                                                       promptTimeout: allowKeychainPrompt) else {
-                if keychainGated {
-                    snap.state = .keychainDenied("Keychain approval needed — click Refresh, then choose Always Allow.")
-                } else if Home.env("CLAUDE_CODE_OAUTH_TOKEN") != nil {
-                    snap.state = .error("Only a setup-token is set — it can't read usage. Run `claude` to log in.")
-                } else {
-                    snap.state = .loggedOut("Not logged in — run `claude` once to sign in.")
-                }
+        func lookup(rejecting rejected: String? = nil) async -> Lookup? {
+            do {
+                return try await loadCredential(mayTouchKeychain: !keychainGated,
+                                                promptTimeout: allowKeychainPrompt,
+                                                rejected: rejected)
+            } catch KeychainError.accessDenied {
+                snap.state = .keychainDenied(approvalMessage)
+            } catch {
+                snap.state = .error("Could not read Claude login.")
+            }
+            return nil
+        }
+        guard let first = await lookup() else { return snap }
+        var credential: Credential
+        switch first {
+        case .found(let found):
+            credential = found
+        case _ where keychainGated:
+            snap.state = .keychainDenied(approvalMessage)
+            return snap
+        case .expired:
+            snap.state = .expired("Claude login expired — open Claude Code or run `claude` to renew it.")
+            return snap
+        case .mcpOnly:
+            snap.state = .loggedOut("No Claude login found — run `claude` and sign in.")
+            return snap
+        case .missing:
+            if Home.env("CLAUDE_CODE_OAUTH_TOKEN") != nil {
+                snap.state = .error("Only a setup-token is set — it can't read usage. Run `claude` to log in.")
+            } else {
+                snap.state = .loggedOut("Not logged in — run `claude` once to sign in.")
+            }
+            return snap
+        }
+        var response: HTTP.Response
+        var retried = false
+        while true {
+            do {
+                response = try await HTTP.send(usageRequest(token: credential.accessToken))
+            } catch {
+                snap.state = .transient("Network error — will retry on next refresh.")
                 return snap
             }
-            credential = found
-        } catch KeychainError.accessDenied {
-            snap.state = .keychainDenied("Keychain approval needed — click Refresh, then choose Always Allow.")
-            return snap
-        } catch {
-            snap.state = .error("Could not read Claude login.")
-            return snap
-        }
-        if let exp = credential.expiresAtMs, exp < Date().timeIntervalSince1970 * 1000 {
-            snap.state = .expired("Token expired — use `claude` once to renew it.")
-            return snap
-        }
-        let response: HTTP.Response
-        do {
-            response = try await HTTP.send(HTTP.get(usageURL, headers: [
-                "Authorization": "Bearer \(credential.accessToken)",
-                "Accept": "application/json",
-                "Content-Type": "application/json",
-                "anthropic-beta": "oauth-2025-04-20",
-                "User-Agent": "claude-cli/2.1.280 (external, cli)",
-            ]))
-        } catch {
-            snap.state = .transient("Network error — will retry on next refresh.")
-            return snap
+            // A rejected token may have been rotated since it was read; look
+            // again once, skipping it, before reporting the login as expired.
+            guard [401, 403].contains(response.status), !retried else { break }
+            retried = true
+            await CredentialCache.shared.clearAll()
+            guard case .found(let next)? = await lookup(rejecting: credential.accessToken) else { break }
+            credential = next
         }
         switch response.status {
         case 200..<300: break
         case 401, 403:
-            await CredentialCache.shared.clearAll()
-            snap.state = .expired("Login rejected — run `claude` again to sign in.")
+            snap.state = .expired("Login rejected — open Claude Code or run `claude` to sign in again.")
             return snap
         case 429:
             snap.state = .transient("Rate limited by Anthropic — waiting for next refresh.")
@@ -159,59 +187,89 @@ enum ClaudeProvider {
                            resetsAt: JSON.date(w["resets_at"]))
     }
 
-    /// Keychain first, then file. A tokenless/expired keychain entry falls
-    /// through to the file so a fresh `claude` re-login elsewhere still wins.
-    /// The Keychain is only touched when allowed (user-initiated, or a prior
-    /// grant makes the read silent); the in-memory cache avoids re-reads.
-    private static func loadCredential(mayTouchKeychain: Bool, promptTimeout: Bool) async throws -> Credential? {
+    /// Every Claude Code Keychain item, newest first (the $CLAUDE_CONFIG_DIR
+    /// one ahead of the rest), then the credentials file. Expired, MCP-only
+    /// and usage-less logins are skipped so a fresh login anywhere wins, and
+    /// the result still says what was skipped. The Keychain is only touched
+    /// when allowed (user-initiated, or a prior grant makes reads silent).
+    /// Blobs are cached per item version, so an item Claude Code rewrites is
+    /// read again on the next refresh.
+    private static func loadCredential(mayTouchKeychain: Bool, promptTimeout: Bool,
+                                       rejected: String?) async throws -> Lookup {
         let configDir = Home.env("CLAUDE_CONFIG_DIR")
+        var sawExpired = false
+        var sawMcpOnly = false
+        var denied = false
+        func usable(_ data: Data) -> Credential? {
+            guard let cred = parseBlob(data) else {
+                if isMcpOnly(data) { sawMcpOnly = true }
+                return nil
+            }
+            guard hasUsageScope(cred) else { return nil }
+            if cred.accessToken == rejected || credentialExpired(cred) {
+                sawExpired = true
+                return nil
+            }
+            return cred
+        }
         if mayTouchKeychain {
-            for service in keychainServices(configDir: configDir) {
-                let cacheKey = "claude:\(service)"
-                if let cached = await CredentialCache.shared.get(cacheKey),
-                   let cred = parseBlob(cached), cred.accessToken.isEmpty == false,
-                   credentialExpired(cred) == false {
-                    return cred
+            for item in keychainItems(configDir: configDir) {
+                let cacheKey = "claude:\(item.service):\(item.modified.timeIntervalSince1970)"
+                let data: Data
+                if let cached = await CredentialCache.shared.get(cacheKey) {
+                    data = cached
+                } else {
+                    do {
+                        guard let read = try await Keychain.read(service: item.service, account: NSUserName(),
+                                                                 timeout: promptTimeout ? 60 : 10) else { continue }
+                        data = read
+                    } catch KeychainError.accessDenied {
+                        denied = true
+                        continue
+                    } catch { continue }
+                    await CredentialCache.shared.set(cacheKey, data)
+                    await MainActor.run { SettingsStore.keychainApproved = true }
                 }
-                do {
-                    if let data = try await Keychain.read(service: service, account: NSUserName(),
-                                                          timeout: promptTimeout ? 60 : 10),
-                       let cred = parseBlob(data), cred.accessToken.isEmpty == false {
-                        if credentialExpired(cred) { continue }
-                        await CredentialCache.shared.set(cacheKey, data)
-                        await MainActor.run { SettingsStore.keychainApproved = true }
-                        return cred
-                    }
-                } catch KeychainError.accessDenied {
-                    throw KeychainError.accessDenied
-                } catch { continue }
+                if let cred = usable(data) { return .found(cred) }
             }
         }
         let path = configDir.map { "\($0)/.credentials.json" } ?? "~/.claude/.credentials.json"
         let expanded: String = configDir == nil ? (path as NSString).expandingTildeInPath : path
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: expanded)),
-           let cred = parseBlob(data), cred.accessToken.isEmpty == false,
-           credentialExpired(cred) == false {
-            return cred
+        if let data = try? Data(contentsOf: URL(fileURLWithPath: expanded)), let cred = usable(data) {
+            return .found(cred)
         }
-        return nil
+        if denied { throw KeychainError.accessDenied }
+        if sawExpired { return .expired }
+        return sawMcpOnly ? .mcpOnly : .missing
     }
 
-    private static func keychainServices(configDir: String?) -> [String] {
-        let base = "Claude Code-credentials"
-        guard let dir = configDir else { return [base] }
-        return ["\(base)-\(shortHash(dir))", base]
+    /// Claude Code names its items "Claude Code-credentials", plus "-" and
+    /// the first 8 hex digits of SHA-256(config dir) for a non-default dir
+    /// (the Claude desktop app uses its own). Listing reads attributes only.
+    private static func keychainItems(configDir: String?) -> [KeychainItem] {
+        var items = Keychain.items(servicePrefix: keychainService, account: NSUserName())
+            .filter { $0.service == keychainService || isScopedService($0.service) }
+        if items.isEmpty {
+            items = [KeychainItem(service: keychainService, modified: .distantPast)]
+        }
+        if let dir = configDir {
+            let scoped = "\(keychainService)-\(configHash(dir))"
+            let match = items.first { $0.service == scoped } ?? KeychainItem(service: scoped, modified: .distantPast)
+            items.removeAll { $0.service == scoped }
+            items.insert(match, at: 0)
+        }
+        return items
     }
 
-    private static func shortHash(_ value: String) -> String {
-        // FNV-1a 32-bit, hex. Only used to locate a config-scoped entry;
-        // a miss simply falls through to the default service name.
-        var hash: UInt32 = 2_166_136_261
-        for byte in value.precomposedStringWithCanonicalMapping.utf8 {
-            hash ^= UInt32(byte)
-            hash &*= 16_777_619
-        }
-        return String(format: "%08x", hash)
+    private static func isScopedService(_ service: String) -> Bool {
+        let suffix = service.dropFirst(keychainService.count + 1)
+        return service.hasPrefix(keychainService + "-") && suffix.count == 8
+            && suffix.allSatisfy { $0.isHexDigit && !$0.isUppercase }
+    }
+
+    private static func configHash(_ dir: String) -> String {
+        let digest = SHA256.hash(data: Data(dir.precomposedStringWithCanonicalMapping.utf8))
+        return String(digest.map { String(format: "%02x", $0) }.joined().prefix(8))
     }
 
     private static func credentialExpired(_ cred: Credential) -> Bool {
@@ -219,12 +277,33 @@ enum ClaudeProvider {
         return exp < Date().timeIntervalSince1970 * 1000
     }
 
-    /// Parses the credentials document ({claudeAiOauth: {...}}); falls back
-    /// to treating the whole blob as a bare token.
+    /// The usage endpoint needs `user:profile`; inference-only tokens 403.
+    private static func hasUsageScope(_ cred: Credential) -> Bool {
+        cred.scopes.map { $0.contains("user:profile") } ?? true
+    }
+
+    /// Claude Code 2.x may store only MCP server logins in an item.
+    private static func isMcpOnly(_ data: Data) -> Bool {
+        guard let root = JSON.object(data) else { return false }
+        return root["claudeAiOauth"] == nil && root["mcpOAuth"] != nil
+    }
+
+    private static func usageRequest(token: String) -> URLRequest {
+        HTTP.get(usageURL, headers: [
+            "Authorization": "Bearer \(token)",
+            "Accept": "application/json",
+            "Content-Type": "application/json",
+            "anthropic-beta": "oauth-2025-04-20",
+            "User-Agent": "claude-cli/2.1.280 (external, cli)",
+        ])
+    }
+
+    /// Parses the credentials document ({claudeAiOauth: {...}}); a blob that
+    /// is not JSON is treated as a bare token.
     private static func parseBlob(_ data: Data) -> Credential? {
-        if let root = JSON.object(data),
-           let oauth = JSON.dict(root["claudeAiOauth"]),
-           let token = JSON.text(oauth["accessToken"]) {
+        if let root = JSON.object(data) {
+            guard let oauth = JSON.dict(root["claudeAiOauth"]),
+                  let token = JSON.text(oauth["accessToken"]) else { return nil }
             var plan: String?
             if let sub = JSON.text(oauth["subscriptionType"]) { plan = sub }
             if let tier = JSON.text(oauth["rateLimitTier"]) {
@@ -232,11 +311,12 @@ enum ClaudeProvider {
             }
             return Credential(accessToken: token,
                               expiresAtMs: JSON.number(oauth["expiresAt"]),
+                              scopes: oauth["scopes"] as? [String],
                               plan: plan)
         }
-        if let token = String(data: data, encoding: .utf8).flatMap({ $0.trimmingCharacters(in: .whitespacesAndNewlines) as String? }),
+        if let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !token.isEmpty {
-            return Credential(accessToken: token, expiresAtMs: nil, plan: nil)
+            return Credential(accessToken: token, expiresAtMs: nil, scopes: nil, plan: nil)
         }
         return nil
     }

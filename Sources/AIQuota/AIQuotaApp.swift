@@ -1,14 +1,15 @@
 import AppKit
-import SwiftUI
 
+/// Plain AppKit entry point: the app is a status item plus one Settings
+/// window, both AppKit-owned. SwiftUI's Settings scene only opens through
+/// SettingsLink/openSettings, which a status-item NSMenu can't reach.
 @main
-struct AIQuotaApp: App {
-    @NSApplicationDelegateAdaptor(AppDelegate.self) var delegate
-
-    var body: some Scene {
-        Settings {
-            SettingsView()
-        }
+enum AIQuotaApp {
+    @MainActor static func main() {
+        let app = NSApplication.shared
+        let delegate = AppDelegate()
+        app.delegate = delegate
+        withExtendedLifetime(delegate) { app.run() }
     }
 }
 
@@ -19,9 +20,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store = UsageStore()
     private var refreshTimer: Timer?
     private let updater = UpdateController()
+    private let settingsWindow = SettingsWindow()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
+        NSApp.mainMenu = Self.mainMenu()
 
         if CommandLine.arguments.contains("--dump-usage") {
             Task {
@@ -41,10 +44,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             updater: UpdateController.isAvailable ? updater : nil,
             onCaffeinateChange: { [weak self] in self?.updateIcon(caffeinated: $0) },
-            onSettings: {
-                NSApp.activate(ignoringOtherApps: true)
-                NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
-            },
+            onSettings: { [weak self] in self?.settingsWindow.show() },
             onQuit: { NSApp.terminate(nil) }
         )
         self.statusMenu = statusMenu
@@ -57,6 +57,19 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await self.store.refresh(userInitiated: false) }
         }
         Task { await store.refresh(userInitiated: false) }
+    }
+
+    /// Accessory apps show no menu bar, but its key equivalents still work
+    /// while the Settings window is key (⌘W closes it).
+    private static func mainMenu() -> NSMenu {
+        let appMenu = NSMenu()
+        appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
+        appMenu.addItem(withTitle: "Quit AIQuota", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        let appItem = NSMenuItem()
+        appItem.submenu = appMenu
+        let main = NSMenu()
+        main.addItem(appItem)
+        return main
     }
 
     /// A steaming cup replaces the pie chart while Caffeinate is on.
