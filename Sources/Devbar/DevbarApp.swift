@@ -4,7 +4,7 @@ import AppKit
 /// window, both AppKit-owned. SwiftUI's Settings scene only opens through
 /// SettingsLink/openSettings, which a status-item NSMenu can't reach.
 @main
-enum AIQuotaApp {
+enum DevbarApp {
     @MainActor static func main() {
         let app = NSApplication.shared
         let delegate = AppDelegate()
@@ -72,7 +72,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private static func mainMenu() -> NSMenu {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
-        appMenu.addItem(withTitle: "Quit AIQuota", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
+        appMenu.addItem(withTitle: "Quit Devbar", action: #selector(NSApplication.terminate(_:)), keyEquivalent: "q")
         let appItem = NSMenuItem()
         appItem.submenu = appMenu
         let main = NSMenu()
@@ -84,7 +84,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private func updateIcon(caffeinated: Bool) {
         statusItem?.button?.image = NSImage(
             systemSymbolName: caffeinated ? "cup.and.heat.waves.fill" : "chart.pie.fill",
-            accessibilityDescription: caffeinated ? "AIQuota, Caffeinate on" : "AIQuota"
+            accessibilityDescription: caffeinated ? "Devbar, Caffeinate on" : "Devbar"
         )
     }
 }

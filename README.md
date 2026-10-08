@@ -1,6 +1,6 @@
-# AIQuota
+# Devbar
 
-Native macOS menu-bar app showing remaining AI quota for Codex, Claude, and Muse Code. Icon-only in the menu bar; click for a native menu with draining quota bars and the dev servers running on your Mac.
+Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, and Muse Code, the dev servers running on your Mac, and a Caffeinate toggle. Icon-only in the menu bar; click for a native menu.
 
 ## Requirements
 
@@ -11,10 +11,10 @@ Native macOS menu-bar app showing remaining AI quota for Codex, Claude, and Muse
 
 ```sh
 swift build                                    # debug build
-.build/debug/AIQuota --dump-usage              # headless JSON check
-.build/debug/AIQuota --dump-ports              # detected dev servers as JSON
-./build-app.sh                                 # signed release bundle -> dist/AIQuota.app
-open dist/AIQuota.app
+.build/debug/Devbar --dump-usage              # headless JSON check
+.build/debug/Devbar --dump-ports              # detected dev servers as JSON
+./build-app.sh                                 # signed release bundle -> dist/Devbar.app
+open dist/Devbar.app
 ```
 
 Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `build-app.sh`. Release bundles require a valid signing identity.
@@ -38,7 +38,7 @@ The menu lists TCP ports that dev servers are listening on (`lsof -nP -iTCP -sTC
 
 Every push to `main` builds on Apple Silicon runners, bumps the patch version tag (`v0.1.0`, `v0.1.1`, …), and publishes `.zip`, `.dmg`, and `.pkg` artifacts. The app and DMG are signed and notarized. The PKG is signed and notarized only when a Developer ID Installer certificate is configured; otherwise it contains the notarized app but is unsigned and does not pass Gatekeeper's installer assessment. The tag is created only after successful packaging.
 
-CI needs these repository secrets (`gh secret set NAME --repo praveenjuge/ai-quota`):
+CI needs these repository secrets (`gh secret set NAME --repo praveenjuge/devbar`):
 
 | Secret | Value |
 |---|---|
@@ -83,7 +83,7 @@ Never commit or log the private key. To restore CI access from this Mac:
 
 ```sh
 security find-generic-password -a ai-quota -s https://sparkle-project.org -w \
-  | gh secret set SPARKLE_PRIVATE_KEY --repo praveenjuge/ai-quota
+  | gh secret set SPARKLE_PRIVATE_KEY --repo praveenjuge/devbar
 ```
 
 CI generates and signs the feed after notarization, uploads all four assets to a
@@ -93,8 +93,8 @@ requires a signed feed and verifies archive signatures before extraction.
 ### Verify updates locally
 
 ```sh
-APP_OUTPUT=dist/e2e-source/AIQuota.app bash build-app.sh 0.1.3
-python3 scripts/verify-updates.py dist/e2e-source/AIQuota.app
+APP_OUTPUT=dist/e2e-source/Devbar.app bash build-app.sh 0.1.3
+python3 scripts/verify-updates.py dist/e2e-source/Devbar.app
 ```
 
 This requires Interceptor with Accessibility permission and the Keychain update
@@ -110,7 +110,7 @@ menu like any system menu. Reopen it to see **Refreshing…** or the update resu
 To verify menu tracking with the canonical menu implementation:
 
 ```sh
-bash scripts/verify-menu-feedback.sh dist/e2e-source/AIQuota.app
+bash scripts/verify-menu-feedback.sh dist/e2e-source/Devbar.app
 ```
 
 The signed test host opens the menu, asserts it stays open while the refresh

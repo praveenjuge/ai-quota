@@ -123,13 +123,13 @@ jobs:
         run: |
           set -euo pipefail
           ditto -c -k --sequesterRsrc --keepParent \
-            dist/AIQuota.app "$RUNNER_TEMP/notarize.zip"
+            dist/Devbar.app "$RUNNER_TEMP/notarize.zip"
           bash scripts/notarize.sh "$RUNNER_TEMP/notarize.zip"
-          xcrun stapler staple dist/AIQuota.app
-          xcrun stapler validate dist/AIQuota.app
-          spctl --assess --type execute --verbose dist/AIQuota.app
-          ditto -c -k --sequesterRsrc --keepParent dist/AIQuota.app \
-            "dist/AIQuota-$VERSION-arm64.zip"
+          xcrun stapler staple dist/Devbar.app
+          xcrun stapler validate dist/Devbar.app
+          spctl --assess --type execute --verbose dist/Devbar.app
+          ditto -c -k --sequesterRsrc --keepParent dist/Devbar.app \
+            "dist/Devbar-$VERSION-arm64.zip"
 
       - name: Sign update and generate feed
         env:
@@ -146,14 +146,14 @@ jobs:
           set -euo pipefail
           staging="$RUNNER_TEMP/dmg"
           mkdir -p "$staging"
-          ditto dist/AIQuota.app "$staging/AIQuota.app"
+          ditto dist/Devbar.app "$staging/Devbar.app"
           ln -s /Applications "$staging/Applications"
-          hdiutil create -volname "AIQuota" -srcfolder "$staging" \
-            -ov -format UDZO "dist/AIQuota-$VERSION-arm64.dmg"
-          codesign --sign "$APP_IDENTITY" --timestamp "dist/AIQuota-$VERSION-arm64.dmg"
-          bash scripts/notarize.sh "dist/AIQuota-$VERSION-arm64.dmg"
-          xcrun stapler staple "dist/AIQuota-$VERSION-arm64.dmg"
-          xcrun stapler validate "dist/AIQuota-$VERSION-arm64.dmg"
+          hdiutil create -volname "Devbar" -srcfolder "$staging" \
+            -ov -format UDZO "dist/Devbar-$VERSION-arm64.dmg"
+          codesign --sign "$APP_IDENTITY" --timestamp "dist/Devbar-$VERSION-arm64.dmg"
+          bash scripts/notarize.sh "dist/Devbar-$VERSION-arm64.dmg"
+          xcrun stapler staple "dist/Devbar-$VERSION-arm64.dmg"
+          xcrun stapler validate "dist/Devbar-$VERSION-arm64.dmg"
 
       - name: Make PKG
         env:
@@ -162,16 +162,16 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          pkg="dist/AIQuota-$VERSION-arm64.pkg"
+          pkg="dist/Devbar-$VERSION-arm64.pkg"
           staging="$RUNNER_TEMP/pkg-root"
           components="$RUNNER_TEMP/pkg-components.plist"
           mkdir -p "$staging"
-          ditto dist/AIQuota.app "$staging/AIQuota.app"
+          ditto dist/Devbar.app "$staging/Devbar.app"
           pkgbuild --analyze --root "$staging" "$components"
           /usr/libexec/PlistBuddy -c "Set :0:BundleIsRelocatable false" "$components"
           /usr/libexec/PlistBuddy -c "Set :0:BundleIsVersionChecked false" "$components"
           pkgbuild --root "$staging" --component-plist "$components" \
-            --identifier com.praveenjuge.ai-quota \
+            --identifier com.praveenjuge.devbar \
             --install-location /Applications \
             --version "$VERSION" "$pkg"
           if [ -n "$INSTALLER_IDENTITY" ]; then
@@ -191,13 +191,13 @@ jobs:
           VERSION: ${{ steps.version.outputs.version }}
         run: |
           set -euo pipefail
-          sudo installer -pkg "dist/AIQuota-$VERSION-arm64.pkg" -target /
-          installed="/Applications/AIQuota.app"
-          cmp dist/AIQuota.app/Contents/MacOS/AIQuota "$installed/Contents/MacOS/AIQuota"
+          sudo installer -pkg "dist/Devbar-$VERSION-arm64.pkg" -target /
+          installed="/Applications/Devbar.app"
+          cmp dist/Devbar.app/Contents/MacOS/Devbar "$installed/Contents/MacOS/Devbar"
           installed_version=$(/usr/libexec/PlistBuddy -c "Print :CFBundleShortVersionString" "$installed/Contents/Info.plist")
           [ "$installed_version" = "$VERSION" ]
           codesign --verify --strict --verbose "$installed"
-          "$installed/Contents/MacOS/AIQuota" --dump-usage
+          "$installed/Contents/MacOS/Devbar" --dump-usage
 
       - name: Clean up signing material
         if: always()
@@ -220,13 +220,13 @@ jobs:
             notes="$notes The PKG is unsigned; use ZIP or DMG for Gatekeeper-approved installation."
           fi
           gh release create "v$VERSION" --draft --title "v$VERSION" --generate-notes --notes "$notes" \
-            "dist/AIQuota-$VERSION-arm64.zip" \
-            "dist/AIQuota-$VERSION-arm64.dmg" \
-            "dist/AIQuota-$VERSION-arm64.pkg" \
+            "dist/Devbar-$VERSION-arm64.zip" \
+            "dist/Devbar-$VERSION-arm64.dmg" \
+            "dist/Devbar-$VERSION-arm64.pkg" \
             dist/appcast.xml
           gh release view "v$VERSION" --json assets --jq '[.assets[].name] | length == 4' | grep -qx true
           verification=$(mktemp -d "$RUNNER_TEMP/release-verification.XXXXXX")
-          gh release download "v$VERSION" --pattern appcast.xml --pattern "AIQuota-$VERSION-arm64.zip" --dir "$verification"
+          gh release download "v$VERSION" --pattern appcast.xml --pattern "Devbar-$VERSION-arm64.zip" --dir "$verification"
           cmp dist/appcast.xml "$verification/appcast.xml"
-          cmp "dist/AIQuota-$VERSION-arm64.zip" "$verification/AIQuota-$VERSION-arm64.zip"
+          cmp "dist/Devbar-$VERSION-arm64.zip" "$verification/Devbar-$VERSION-arm64.zip"
           gh release edit "v$VERSION" --draft=false --latest

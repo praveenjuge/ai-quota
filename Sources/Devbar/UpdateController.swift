@@ -14,7 +14,7 @@ final class UpdateController: NSObject, SPUUpdaterDelegate, SPUUserDriver {
     private var manual = false
     private var expected: UInt64 = 0
     private var received: UInt64 = 0
-    private let logger = Logger(subsystem: "com.praveenjuge.ai-quota", category: "updates")
+    private let logger = Logger(subsystem: "com.praveenjuge.devbar", category: "updates")
 
     static var isAvailable: Bool {
         #if DEBUG

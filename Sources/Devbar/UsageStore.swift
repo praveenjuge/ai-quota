@@ -8,15 +8,15 @@ import os
 @Observable
 final class UsageStore {
     static let refreshInterval: TimeInterval = {
-        // AIQUOTA_REFRESH_SECONDS overrides the 10-minute default (testing).
-        if let raw = Home.env("AIQUOTA_REFRESH_SECONDS"),
+        // DEVBAR_REFRESH_SECONDS overrides the 10-minute default (testing).
+        if let raw = Home.env("DEVBAR_REFRESH_SECONDS"),
            let seconds = TimeInterval(raw), seconds >= 10 {
             return seconds
         }
         return 600
     }()
 
-    private static let log = Logger(subsystem: "com.praveenjuge.ai-quota", category: "refresh")
+    private static let log = Logger(subsystem: "com.praveenjuge.devbar", category: "refresh")
 
     var snapshots: [ProviderID: ProviderSnapshot] = [:]
     var isRefreshing = false

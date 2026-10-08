@@ -85,7 +85,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             renderedMenu.addItem(item)
         }
         renderedMenu.addItem(.separator())
-        let quit = NSMenuItem(title: "Quit AIQuota", action: #selector(quitApp), keyEquivalent: "q")
+        let quit = NSMenuItem(title: "Quit Devbar", action: #selector(quitApp), keyEquivalent: "q")
         quit.target = self
         renderedMenu.addItem(quit)
         // Never empty a menu while it is tracking: removing its last item

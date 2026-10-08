@@ -36,7 +36,7 @@ struct SettingsView: View {
                     }
                 ))
                 if needsApproval {
-                    LabeledContent("Allow AIQuota in Login Items to finish.") {
+                    LabeledContent("Allow Devbar in Login Items to finish.") {
                         Button("Open Login Items…") { SMAppService.openSystemSettingsLoginItems() }
                     }
                 }
@@ -95,7 +95,7 @@ final class SettingsWindow {
 
     private func makeWindow() -> NSWindow {
         let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
-        window.title = "AIQuota Settings"
+        window.title = "Devbar Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false
         // Open on the Space the menu was used from, even over a full-screen app.

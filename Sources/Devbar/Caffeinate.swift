@@ -19,7 +19,7 @@ final class Caffeinate {
             let result = IOPMAssertionCreateWithName(
                 kIOPMAssertionTypePreventUserIdleDisplaySleep as CFString,
                 IOPMAssertionLevel(kIOPMAssertionLevelOn),
-                "AIQuota Caffeinate" as CFString,
+                "Devbar Caffeinate" as CFString,
                 &id
             )
             if result == kIOReturnSuccess { assertionID = id }

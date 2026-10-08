@@ -38,7 +38,7 @@ def scenario(source, action):
     version = {'equal': '0.1.2', 'older': '0.1.1'}.get(action, '0.1.3')
     output = run('bash', 'scripts/prepare-update-e2e.sh', source, version)
     root = pathlib.Path(output.strip().splitlines()[-1])
-    app = root / 'installed/AIQuota.app'
+    app = root / 'installed/Devbar.app'
     info = app / 'Contents/Info.plist'
     identifier = plistlib.loads(info.read_bytes())['CFBundleIdentifier']
     class Handler(http.server.SimpleHTTPRequestHandler):
@@ -65,7 +65,7 @@ def scenario(source, action):
     elif action == 'malformed-feed':
         (root / 'feed/appcast.xml').write_text('invalid xml')
     elif action == 'invalid-archive':
-        with (root / 'feed/AIQuota-0.1.3-arm64.zip').open('ab') as f:
+        with (root / 'feed/Devbar-0.1.3-arm64.zip').open('ab') as f:
             f.write(b'corrupt')
     process = subprocess.Popen(['open', '-W', '-n', str(app)],
                                stdout=(root / 'app.log').open('w'), stderr=subprocess.STDOUT)
@@ -81,7 +81,7 @@ def scenario(source, action):
     try:
         if action in ('restart', 'quit'):
             text = wait_for(lambda: (t if 'Restart and update' in (t := tree()) else None))
-            label = 'Restart and update' if action == 'restart' else 'Quit AIQuota'
+            label = 'Restart and update' if action == 'restart' else 'Quit Devbar'
             ref = re.findall(r'\[(e\d+)\] (?:menuitem|button) "' + label + '"', text)[-1]
             run('interceptor', 'macos', 'act', ref)
             wait_for(lambda: plistlib.loads(info.read_bytes())['CFBundleVersion'] == '0.1.3')
@@ -108,7 +108,7 @@ def scenario(source, action):
         # fixture path instead of assuming the launcher PID owns the app.
         for line in run('ps', '-axo', 'pid=,command=').splitlines():
             fields = line.strip().split(maxsplit=1)
-            if len(fields) == 2 and str(root) in fields[1] and fields[1].endswith('/Contents/MacOS/AIQuota'):
+            if len(fields) == 2 and str(root) in fields[1] and fields[1].endswith('/Contents/MacOS/Devbar'):
                 try:
                     os.kill(int(fields[0]), signal.SIGTERM)
                 except ProcessLookupError:

@@ -3,11 +3,11 @@
 set -euo pipefail
 version="$1"
 [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || exit 1
-archive="dist/AIQuota-$version-arm64.zip"
+archive="dist/Devbar-$version-arm64.zip"
 tools=".build/artifacts/sparkle/Sparkle/bin"
-feed_dir=$(mktemp -d "${TMPDIR:-/tmp}/aiquota-appcast.XXXXXX")
+feed_dir=$(mktemp -d "${TMPDIR:-/tmp}/devbar-appcast.XXXXXX")
 cp "$archive" "$feed_dir/"
-args=(--maximum-versions 1 --maximum-deltas 0 --download-url-prefix "https://github.com/praveenjuge/ai-quota/releases/download/v$version/" -o dist/appcast.xml)
+args=(--maximum-versions 1 --maximum-deltas 0 --download-url-prefix "https://github.com/praveenjuge/devbar/releases/download/v$version/" -o dist/appcast.xml)
 if [ -n "${SPARKLE_PRIVATE_KEY:-}" ]; then
     printf '%s' "$SPARKLE_PRIVATE_KEY" | "$tools/generate_appcast" --ed-key-file - "${args[@]}" "$feed_dir"
 else
@@ -23,7 +23,7 @@ assert len(items)==1
 item=items[0]
 assert item.findtext('s:version', namespaces=ns)==sys.argv[1]
 e=item.find('enclosure')
-assert e.attrib['url']==f'https://github.com/praveenjuge/ai-quota/releases/download/v{sys.argv[1]}/AIQuota-{sys.argv[1]}-arm64.zip'
+assert e.attrib['url']==f'https://github.com/praveenjuge/devbar/releases/download/v{sys.argv[1]}/Devbar-{sys.argv[1]}-arm64.zip'
 assert e.attrib['{'+ns['s']+'}edSignature']
 assert int(e.attrib['length'])>0
 PY
