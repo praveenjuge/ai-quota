@@ -10,7 +10,11 @@ let package = Package(
             name: "Devbar",
             dependencies: [.product(name: "Sparkle", package: "Sparkle")],
             path: "Sources/Devbar",
-            linkerSettings: [.unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"])]
+            linkerSettings: [
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path/../Frameworks"]),
+                // Debug runs use the bare binary, with Sparkle.framework beside it.
+                .unsafeFlags(["-Xlinker", "-rpath", "-Xlinker", "@executable_path"], .when(configuration: .debug)),
+            ]
         )
     ]
 )
