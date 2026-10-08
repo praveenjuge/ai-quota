@@ -13,12 +13,21 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var refreshItem: NSMenuItem?
     private var refreshView: MenuActionView?
     private var updateView: MenuActionView?
+    private let caffeinate = Caffeinate()
+    private let onCaffeinateChange: (Bool) -> Void
     private let onSettings: () -> Void
     private let onQuit: () -> Void
 
-    init(store: UsageStore, updater: UpdateController?, onSettings: @escaping () -> Void, onQuit: @escaping () -> Void) {
+    init(
+        store: UsageStore,
+        updater: UpdateController?,
+        onCaffeinateChange: @escaping (Bool) -> Void,
+        onSettings: @escaping () -> Void,
+        onQuit: @escaping () -> Void
+    ) {
         self.store = store
         self.updater = updater
+        self.onCaffeinateChange = onCaffeinateChange
         self.onSettings = onSettings
         self.onQuit = onQuit
         super.init()
@@ -55,6 +64,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         self.refreshView = refreshView
         refreshItem = refresh
         renderedMenu.addItem(refresh)
+        let caffeinateItem = NSMenuItem(title: "Caffeinate", action: #selector(toggleCaffeinate), keyEquivalent: "")
+        caffeinateItem.target = self
+        caffeinateItem.state = caffeinate.isOn ? .on : .off
+        renderedMenu.addItem(caffeinateItem)
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         renderedMenu.addItem(settings)
@@ -230,6 +243,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             await store.refresh(userInitiated: true)
             self.rebuild()
         }
+    }
+
+    @objc private func toggleCaffeinate(_ sender: Any?) {
+        caffeinate.toggle()
+        onCaffeinateChange(caffeinate.isOn)
+        rebuild()
     }
 
     @objc private func openSettings(_ sender: Any?) {

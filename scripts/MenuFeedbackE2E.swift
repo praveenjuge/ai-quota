@@ -16,7 +16,7 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
         for id in ProviderID.allCases {
             UserDefaults.standard.set(false, forKey: "provider.\(id.rawValue).enabled")
         }
-        status = StatusMenu(store: UsageStore(), updater: updater, onSettings: {}, onQuit: {})
+        status = StatusMenu(store: UsageStore(), updater: updater, onCaffeinateChange: { _ in }, onSettings: {}, onQuit: {})
         status.menu.delegate = self
         updater.onChange = { [weak self] in self?.status.updateUpdateItem() }
         updater.start()

@@ -33,16 +33,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-        item.button?.image = NSImage(
-            systemSymbolName: "chart.pie.fill",
-            accessibilityDescription: "AIQuota"
-        )
         item.button?.imagePosition = .imageOnly
         statusItem = item
+        updateIcon(caffeinated: false)
 
         let statusMenu = StatusMenu(
             store: store,
             updater: UpdateController.isAvailable ? updater : nil,
+            onCaffeinateChange: { [weak self] in self?.updateIcon(caffeinated: $0) },
             onSettings: {
                 NSApp.activate(ignoringOtherApps: true)
                 NSApp.sendAction(Selector(("showSettingsWindow:")), to: nil, from: nil)
@@ -59,6 +57,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             Task { await self.store.refresh(userInitiated: false) }
         }
         Task { await store.refresh(userInitiated: false) }
+    }
+
+    /// A steaming cup replaces the pie chart while Caffeinate is on.
+    private func updateIcon(caffeinated: Bool) {
+        statusItem?.button?.image = NSImage(
+            systemSymbolName: caffeinated ? "cup.and.heat.waves.fill" : "chart.pie.fill",
+            accessibilityDescription: caffeinated ? "AIQuota, Caffeinate on" : "AIQuota"
+        )
     }
 }
 
