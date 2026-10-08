@@ -1,6 +1,6 @@
 # AIQuota
 
-Native macOS menu-bar app showing remaining AI quota for Codex, Claude, and Muse Code. Icon-only in the menu bar; click for a native menu with draining quota bars.
+Native macOS menu-bar app showing remaining AI quota for Codex, Claude, and Muse Code. Icon-only in the menu bar; click for a native menu with draining quota bars and the dev servers running on your Mac.
 
 ## Requirements
 
@@ -12,6 +12,7 @@ Native macOS menu-bar app showing remaining AI quota for Codex, Claude, and Muse
 ```sh
 swift build                                    # debug build
 .build/debug/AIQuota --dump-usage              # headless JSON check
+.build/debug/AIQuota --dump-ports              # detected dev servers as JSON
 ./build-app.sh                                 # signed release bundle -> dist/AIQuota.app
 open dist/AIQuota.app
 ```
@@ -28,6 +29,10 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
 - Keychain is read via the `/usr/bin/security` subprocess (stable attribution, so one Always Allow sticks), blobs are cached in memory, and background refreshes never prompt.
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.
 - Menu rows are stock `NSMenuItem`s: section headers per provider, quota rows with the remaining percentage as a badge and the reset time as subtitle. Each quota bar is a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text; AppKit colors it (yellow under 25%, red under 10%).
+
+## Dev Servers
+
+The menu lists TCP ports that dev servers are listening on (`lsof -nP -iTCP -sTCP:LISTEN`), scanned each time the menu opens. A listener counts as a dev server when its process was started from a project folder: system services and apps, which launchd starts in `/` or inside their app bundle, are left out. Each row shows `localhost:<port>` with the project folder and process name; its submenu opens it in the browser, copies the URL or PID, hides that process name, or stops the process (`SIGTERM`, or `SIGKILL` as Force Stop while holding ⌥).
 
 ## Releases
 
@@ -53,7 +58,7 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific passwo
 
 ## Settings
 
-Provider toggles, launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `keychainApproved`).
+Provider toggles, Show dev servers (with a list of hidden processes to restore), launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `devServers.enabled`, `devServers.hidden`, `keychainApproved`).
 
 ## Automatic updates
 

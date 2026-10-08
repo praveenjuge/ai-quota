@@ -1,8 +1,8 @@
 import Foundation
 import ServiceManagement
 
-/// Minimal persisted settings: one on/off toggle per provider plus
-/// launch-at-login. Backed by UserDefaults; no custom UI anywhere.
+/// Minimal persisted settings: one on/off toggle per provider, Dev Servers,
+/// and launch-at-login. Backed by UserDefaults; no custom UI anywhere.
 @MainActor
 enum SettingsStore {
     private static let defaults = UserDefaults.standard
@@ -21,6 +21,19 @@ enum SettingsStore {
     static var keychainApproved: Bool {
         get { defaults.bool(forKey: "keychain.approved") }
         set { defaults.set(newValue, forKey: "keychain.approved") }
+    }
+
+    static let showDevServersKey = "devServers.enabled"
+    static let hiddenProcessesKey = "devServers.hidden"
+
+    static var showDevServers: Bool {
+        defaults.object(forKey: showDevServersKey) as? Bool ?? true
+    }
+
+    /// Process names (as `lsof` reports them) left out of Dev Servers.
+    static var hiddenProcesses: [String] {
+        get { defaults.stringArray(forKey: hiddenProcessesKey) ?? [] }
+        set { defaults.set(newValue.sorted(), forKey: hiddenProcessesKey) }
     }
 
     /// On once registered, even while macOS still waits for approval.

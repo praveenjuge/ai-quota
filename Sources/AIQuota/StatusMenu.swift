@@ -1,7 +1,7 @@
 import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
-/// quota rows, then Refresh / Settings / Quit. All rows are stock menu
+/// quota rows, running dev servers, then Refresh / Settings / Quit. All rows are stock menu
 /// items: section headers, badged rows with subtitles, plus native
 /// capacity indicators on their own lines.
 @MainActor
@@ -13,6 +13,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var updateItem: NSMenuItem?
     private var refreshItem: NSMenuItem?
     private let caffeinate = Caffeinate()
+    private var ports: [ListeningPort] = []
     private let onCaffeinateChange: (Bool) -> Void
     private let onSettings: () -> Void
     private let onQuit: () -> Void
@@ -37,6 +38,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         // Bars stretch to the menu width; this keeps them from getting stubby.
         menu.minimumWidth = Self.minimumWidth
         rebuild()
+        Task {
+            await refreshPorts()
+            self.rebuild()
+        }
     }
 
     static let minimumWidth: CGFloat = 240
@@ -49,6 +54,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         for (index, id) in enabled.enumerated() {
             if index > 0 { renderedMenu.addItem(.separator()) }
             addSection(for: id)
+        }
+        if SettingsStore.showDevServers {
+            if !enabled.isEmpty { renderedMenu.addItem(.separator()) }
+            addPortsSection()
         }
         renderedMenu.addItem(.separator())
         let refresh = NSMenuItem(
@@ -91,6 +100,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     func menuWillOpen(_ menu: NSMenu) {
         rebuild()
+        Task {
+            await refreshPorts()
+            self.rebuild()
+        }
         Task {
             await store.refresh(userInitiated: true)
             self.rebuild()
@@ -140,6 +153,53 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         barItem.view = BarView(remaining: remaining, label: label)
         renderedMenu.addItem(barItem)
         return 1
+    }
+
+    // MARK: - Dev servers
+
+    private func refreshPorts() async {
+        guard SettingsStore.showDevServers else {
+            ports = []
+            return
+        }
+        ports = await PortScanner.scan(hidden: Set(SettingsStore.hiddenProcesses))
+    }
+
+    private func addPortsSection() {
+        renderedMenu.addItem(.sectionHeader(title: "Dev Servers"))
+        if ports.isEmpty {
+            renderedMenu.addItem(info("No dev servers running", dimmed: true))
+        }
+        for port in ports {
+            let row = NSMenuItem(title: "localhost:\(port.port)", action: nil, keyEquivalent: "")
+            setDetail("\(port.project) · \(port.process)", on: row)
+            row.submenu = portMenu(for: port)
+            renderedMenu.addItem(row)
+        }
+    }
+
+    private func portMenu(for port: ListeningPort) -> NSMenu {
+        let menu = NSMenu()
+        menu.addItem(portAction("Open in Browser", #selector(openPort), port))
+        menu.addItem(portAction("Copy URL", #selector(copyURL), port))
+        menu.addItem(portAction("Copy PID", #selector(copyPID), port))
+        menu.addItem(.separator())
+        menu.addItem(portAction("Hide \u{201C}\(port.process)\u{201D}", #selector(hideProcess), port))
+        menu.addItem(.separator())
+        menu.addItem(portAction("Stop Process", #selector(stopProcess), port))
+        // Holding Option swaps in Force Stop, like Force Quit in the Apple menu.
+        let force = portAction("Force Stop Process", #selector(forceStopProcess), port)
+        force.keyEquivalentModifierMask = .option
+        force.isAlternate = true
+        menu.addItem(force)
+        return menu
+    }
+
+    private func portAction(_ title: String, _ action: Selector, _ port: ListeningPort) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
+        item.target = self
+        item.representedObject = port
+        return item
     }
 
     private func headerText(for id: ProviderID, snap: ProviderSnapshot?) -> String {
@@ -200,6 +260,48 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func toggleCaffeinate(_ sender: Any?) {
         caffeinate.toggle()
         onCaffeinateChange(caffeinate.isOn)
+        rebuild()
+    }
+
+    @objc private func openPort(_ sender: NSMenuItem) {
+        guard let port = sender.representedObject as? ListeningPort else { return }
+        NSWorkspace.shared.open(port.url)
+    }
+
+    @objc private func copyURL(_ sender: NSMenuItem) {
+        guard let port = sender.representedObject as? ListeningPort else { return }
+        copy(port.url.absoluteString)
+    }
+
+    @objc private func copyPID(_ sender: NSMenuItem) {
+        guard let port = sender.representedObject as? ListeningPort else { return }
+        copy(String(port.pid))
+    }
+
+    private func copy(_ text: String) {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(text, forType: .string)
+    }
+
+    @objc private func hideProcess(_ sender: NSMenuItem) {
+        guard let port = sender.representedObject as? ListeningPort else { return }
+        SettingsStore.hiddenProcesses = Array(Set(SettingsStore.hiddenProcesses).union([port.process]))
+        ports.removeAll { $0.process == port.process }
+        rebuild()
+    }
+
+    @objc private func stopProcess(_ sender: NSMenuItem) {
+        stop(sender, force: false)
+    }
+
+    @objc private func forceStopProcess(_ sender: NSMenuItem) {
+        stop(sender, force: true)
+    }
+
+    private func stop(_ sender: NSMenuItem, force: Bool) {
+        guard let port = sender.representedObject as? ListeningPort else { return }
+        PortScanner.stop(port, force: force)
+        ports.removeAll { $0.pid == port.pid }
         rebuild()
     }
 

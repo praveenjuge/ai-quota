@@ -34,6 +34,14 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if CommandLine.arguments.contains("--dump-ports") {
+            Task {
+                let ports = await PortScanner.scan(hidden: Set(SettingsStore.hiddenProcesses))
+                print(Dump.json(ports: ports))
+                NSApp.terminate(nil)
+            }
+            return
+        }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.imagePosition = .imageOnly
@@ -103,6 +111,14 @@ enum Dump {
         }
         let data = (try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])) ?? Data()
         return String(data: data, encoding: .utf8) ?? "{}"
+    }
+
+    static func json(ports: [ListeningPort]) -> String {
+        let rows: [[String: Any]] = ports.map {
+            ["port": $0.port, "pid": $0.pid, "process": $0.process, "directory": $0.directory]
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys, .prettyPrinted])) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "[]"
     }
 
     private static func window(_ w: UsageWindow) -> [String: Any] {

@@ -4,11 +4,28 @@ import SwiftUI
 struct SettingsView: View {
     @State private var launchAtLogin = SettingsStore.launchAtLogin
     @State private var needsApproval = SettingsStore.launchAtLoginNeedsApproval
+    @State private var hiddenProcesses = SettingsStore.hiddenProcesses
+    @AppStorage(SettingsStore.showDevServersKey) private var showDevServers = true
 
     var body: some View {
         Form {
             Section("Providers") {
                 ForEach(ProviderID.allCases, id: \.self) { ProviderToggle(id: $0) }
+            }
+            Section {
+                Toggle("Show dev servers", isOn: $showDevServers)
+                if !hiddenProcesses.isEmpty {
+                    LabeledContent("Hidden: \(hiddenProcesses.formatted(.list(type: .and)))") {
+                        Button("Show All") {
+                            SettingsStore.hiddenProcesses = []
+                            hiddenProcesses = []
+                        }
+                    }
+                }
+            } header: {
+                Text("Dev Servers")
+            } footer: {
+                Text("Ports opened by processes started from a project folder.")
             }
             Section {
                 Toggle("Launch at login", isOn: Binding(
@@ -35,6 +52,10 @@ struct SettingsView: View {
         // Approval happens in System Settings; pick it up on return.
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
             syncLoginState()
+        }
+        // Processes are hidden from the menu, possibly while this window is open.
+        .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
+            hiddenProcesses = SettingsStore.hiddenProcesses
         }
     }
 
