@@ -27,7 +27,7 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
   - Muse: `~/.config/muse/auth.json` or Keychain `ai.meta.dev.credentials/meta` → `POST api.meta.ai/muse-code/key` (minted key is discarded)
 - Keychain is read via the `/usr/bin/security` subprocess (stable attribution, so one Always Allow sticks), blobs are cached in memory, and background refreshes never prompt.
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.
-- Menu rows are stock `NSMenuItem`s; each quota bar uses a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text.
+- Menu rows are stock `NSMenuItem`s: section headers per provider, quota rows with the remaining percentage as a badge and the reset time as subtitle. Each quota bar is a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text; AppKit colors it (yellow under 25%, red under 10%).
 
 ## Releases
 
@@ -53,7 +53,7 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific passwo
 
 ## Settings
 
-Provider toggles, launch at login (`SMAppService`), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `keychainApproved`).
+Provider toggles, launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `keychainApproved`).
 
 ## Automatic updates
 
@@ -99,8 +99,8 @@ and rejection of invalid feeds/archives. Results are saved in
 `dist/verification/update-e2e.json`; each result links retained menu trees and
 app logs. Production apps and preferences are untouched.
 
-Refresh and Check for updates use embedded native buttons so clicking them keeps
-the status menu open. Refresh shows **Refreshing…** until the new data arrives.
+Refresh and Check for updates are stock menu items, so clicking them closes the
+menu like any system menu. Reopen it to see **Refreshing…** or the update result.
 
 To verify menu tracking with the canonical menu implementation:
 
@@ -108,5 +108,6 @@ To verify menu tracking with the canonical menu implementation:
 bash scripts/verify-menu-feedback.sh dist/e2e-source/AIQuota.app
 ```
 
-The signed test host clicks both embedded buttons while the menu is tracking,
-asserts it stays open through completion, and retains its results and menu image.
+The signed test host opens the menu, asserts it stays open while the refresh
+rebuilds it, then checks for updates and asserts the result shows when the menu
+reopens. Results are retained.

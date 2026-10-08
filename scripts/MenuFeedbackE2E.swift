@@ -7,6 +7,7 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var status: StatusMenu!
     private let updater = UpdateController()
     private var isOpen = false
+    private var didOpen = false
     private var stage = 0
     private var timer: Timer!
     private var ticks = 0
@@ -29,11 +30,11 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
         RunLoop.main.add(timer, forMode: .common)
         RunLoop.main.add(timer, forMode: .eventTracking)
         openMenu()
-
     }
 
     func menuWillOpen(_ menu: NSMenu) {
         isOpen = true
+        didOpen = true
         print("Menu opened")
         status.menuWillOpen(menu)
     }
@@ -54,58 +55,46 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private func tick() {
         ticks += 1
         guard ticks < 120 else { fail("feedback timeout") ; return }
-        guard isOpen else {
-            if stage == 0 {
-                openMenu()
-            } else {
-                fail("menu closed during feedback")
-            }
-            return
-        }
         switch stage {
         case 0:
-            stage = 1
-            click("Refresh")
-        case 1:
-            guard status.menu.items.contains(where: { $0.title == "Refresh" }) else { return }
-            guard let row = status.menu.items.first(where: { $0.title == "Refresh" }),
-                  let label = row.view?.subviews.compactMap({ $0 as? NSTextField }).first,
-                  label.stringValue.hasPrefix("Updated "),
-                  let button = row.view?.subviews.first as? NSButton,
-                  button.frame.maxX + 8 <= label.frame.minX,
-                  !status.menu.items.contains(where: { $0.title.hasPrefix("Updated ") }) else {
-                fail("refresh and timestamp must share one row without overlap")
+            // Opening the menu refreshes and rebuilds it while it tracks.
+            guard isOpen else {
+                if didOpen { fail("menu closed while refreshing") }
                 return
             }
-            guard updater.enabled else { return }
-            print("PASS: Refresh and timestamp share one row without overlap")
-            print("PASS: Refresh keeps menu tracking")
-            stage = 2
-            click("Check for updates…")
-        default:
-            guard updater.title == "You’re up to date" else { return }
-            print("PASS: Check for updates keeps menu tracking and shows result")
-            if CommandLine.arguments.count > 1,
-               let content = status.menu.items.compactMap({ $0.view?.window?.contentView }).first,
-               let bitmap = content.bitmapImageRepForCachingDisplay(in: content.bounds) {
-                content.cacheDisplay(in: content.bounds, to: bitmap)
-                if let data = bitmap.representation(using: .png, properties: [:]) {
-                    try? data.write(to: URL(fileURLWithPath: CommandLine.arguments[1]).appendingPathComponent("menu-feedback.png"))
-                }
+            guard let refresh = item("Refresh"), refresh.subtitle?.hasPrefix("Updated ") == true else { return }
+            guard status.menu.items.allSatisfy({ $0.view == nil }) else {
+                fail("action rows must be stock menu items")
+                return
             }
+            print("PASS: Menu stays open while the refresh rebuilds it")
+            print("PASS: Refresh is a stock item with its update time as subtitle")
+            stage = 1
+            status.menu.cancelTracking()
+        case 1:
+            guard !isOpen, updater.enabled,
+                  let check = item("Check for updates…") else { return }
+            stage = 2
+            status.menu.performActionForItem(at: status.menu.index(of: check))
+        case 2:
+            guard updater.title == "You’re up to date" else { return }
+            stage = 3
+            openMenu()
+        default:
+            guard isOpen else { return }
+            guard item("You’re up to date") != nil else {
+                fail("update result missing from reopened menu")
+                return
+            }
+            print("PASS: Check for updates shows its result when the menu reopens")
             timer.invalidate()
             status.menu.cancelTracking()
             NSApp.terminate(nil)
         }
     }
 
-    private func click(_ title: String) {
-        guard let row = status.menu.items.first(where: { $0.title == title }),
-              let button = row.view?.subviews.first as? NSButton else {
-            fail("missing button: \(title)")
-            return
-        }
-        button.performClick(nil)
+    private func item(_ title: String) -> NSMenuItem? {
+        status.menu.items.first { $0.title == title }
     }
     private func fail(_ message: String) {
         print("FAIL: \(message)")

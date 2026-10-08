@@ -2,7 +2,8 @@ import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
 /// quota rows, then Refresh / Settings / Quit. All rows are stock menu
-/// items: text rows plus native capacity indicators on their own lines.
+/// items: section headers, badged rows with subtitles, plus native
+/// capacity indicators on their own lines.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     let menu = NSMenu()
@@ -11,8 +12,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let updater: UpdateController?
     private var updateItem: NSMenuItem?
     private var refreshItem: NSMenuItem?
-    private var refreshView: MenuActionView?
-    private var updateView: MenuActionView?
     private let caffeinate = Caffeinate()
     private let onCaffeinateChange: (Bool) -> Void
     private let onSettings: () -> Void
@@ -35,33 +34,31 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         // Explicit enabled states (auto-validation would re-enable
         // actionless rows, defeating the dimmed style).
         menu.autoenablesItems = false
+        // Bars stretch to the menu width; this keeps them from getting stubby.
+        menu.minimumWidth = Self.minimumWidth
         rebuild()
     }
+
+    static let minimumWidth: CGFloat = 240
 
     /// Rebuild items from the latest snapshots (cheap, synchronous).
     func rebuild() {
         let previousItems = menu.items
         renderedMenu = NSMenu()
         let enabled = ProviderID.allCases.filter { SettingsStore.isEnabled($0) }
-        // Match the menu width while keeping capacity indicators inset
-        // from the edges of their full-width menu-item views.
-        let refreshDetail = store.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" }
-        let refreshWidth = (("Refreshing…" + (refreshDetail ?? "")) as NSString)
-            .size(withAttributes: [.font: NSFont.menuFont(ofSize: NSFont.systemFontSize)]).width + 40
-        let barWidth = max(measureBarWidth(enabled: enabled), refreshWidth)
         for (index, id) in enabled.enumerated() {
             if index > 0 { renderedMenu.addItem(.separator()) }
-            addSection(for: id, barWidth: barWidth)
+            addSection(for: id)
         }
         renderedMenu.addItem(.separator())
-        let refresh = NSMenuItem(title: "Refresh", action: #selector(refreshNow), keyEquivalent: "r")
+        let refresh = NSMenuItem(
+            title: store.isRefreshing ? "Refreshing…" : "Refresh",
+            action: #selector(refreshNow),
+            keyEquivalent: "r"
+        )
         refresh.target = self
-        let refreshView = MenuActionView(title: store.isRefreshing ? "Refreshing…" : "Refresh", width: barWidth, detail: refreshDetail) { [weak self] in
-            self?.refreshNow(nil)
-        }
-        refreshView.update(title: store.isRefreshing ? "Refreshing…" : "Refresh", enabled: !store.isRefreshing)
-        refresh.view = refreshView
-        self.refreshView = refreshView
+        refresh.isEnabled = !store.isRefreshing
+        setDetail(store.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" }, on: refresh)
         refreshItem = refresh
         renderedMenu.addItem(refresh)
         let caffeinateItem = NSMenuItem(title: "Caffeinate", action: #selector(toggleCaffeinate), keyEquivalent: "")
@@ -76,10 +73,6 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             item.target = self
             item.isEnabled = updater.enabled
             updateItem = item
-            let view = MenuActionView(title: updater.title, width: barWidth) { [weak self] in self?.updateApp(nil) }
-            item.view = view
-            updateView = view
-            view.update(title: updater.title, enabled: updater.enabled)
             renderedMenu.addItem(item)
         }
         renderedMenu.addItem(.separator())
@@ -107,50 +100,44 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     func updateUpdateItem() {
         updateItem?.title = updater?.title ?? ""
         updateItem?.isEnabled = updater?.enabled ?? false
-        updateView?.update(title: updater?.title ?? "", enabled: updater?.enabled ?? false)
     }
 
     @objc private func updateApp(_ sender: Any?) {
-        if updater?.title == "Restart and update" { menu.cancelTracking() }
         updater?.activate()
     }
 
     // MARK: - Sections
 
-    private func addSection(for id: ProviderID, barWidth: CGFloat) {
+    private func addSection(for id: ProviderID) {
         let snap = store.snapshot(for: id)
-        renderedMenu.addItem(info(headerText(for: id, snap: snap), dimmed: true))
+        renderedMenu.addItem(.sectionHeader(title: headerText(for: id, snap: snap)))
         if let message = snap?.state.message {
             renderedMenu.addItem(info(message, dimmed: true))
             return
         }
         var rows = 0
-        rows += addRow(label: "Session", window: snap?.session, barWidth: barWidth)
-        rows += addRow(label: "Weekly", window: snap?.weekly, barWidth: barWidth)
+        rows += addRow(label: "Session", window: snap?.session)
+        rows += addRow(label: "Weekly", window: snap?.weekly)
         for extra in snap?.extraRows ?? [] {
-            rows += addRow(label: extra.label, window: extra.window, barWidth: barWidth)
+            rows += addRow(label: extra.label, window: extra.window)
         }
         if rows == 0 {
             renderedMenu.addItem(info("No usage reported yet", dimmed: true))
         }
     }
 
-    /// One quota row: text line (reset countdown faded inline) plus a
-    /// draining bar on its own line below. Returns 1 when rendered.
+    /// One quota row: label with the remaining percentage as a badge and
+    /// the reset time as subtitle, plus a draining bar on its own line
+    /// below. Returns 1 when rendered.
     @discardableResult
-    private func addRow(label: String, window: UsageWindow?, barWidth: CGFloat) -> Int {
-        guard let used = window?.usedPercent, let text = rowText(label: label, window: window) else { return 0 }
-        let row = info("")
-        row.attributedTitle = text
+    private func addRow(label: String, window: UsageWindow?) -> Int {
+        guard let remaining = window?.remainingPercent else { return 0 }
+        let row = info(label)
+        row.badge = NSMenuItemBadge(string: "\((remaining / 100).formatted(.percent.precision(.fractionLength(0)))) left")
+        setDetail(resetText(window?.resetsAt), on: row)
         renderedMenu.addItem(row)
         let barItem = NSMenuItem()
-        let view = BarView(
-            width: barWidth,
-            remaining: 100 - used,
-            color: Self.barColor(forRemaining: 100 - used),
-            label: label
-        )
-        barItem.view = view
+        barItem.view = BarView(remaining: remaining, label: label)
         renderedMenu.addItem(barItem)
         return 1
     }
@@ -161,40 +148,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return header
     }
 
-    private func rowText(label: String, window: UsageWindow?) -> NSMutableAttributedString? {
-        guard let used = window?.usedPercent else { return nil }
-        let text = NSMutableAttributedString(
-            string: "\(label) — \(Int((100 - used).rounded()))% left"
-        )
-        if let reset = resetText(window?.resetsAt) {
-            text.append(NSAttributedString(
-                string: " · \(reset)",
-                attributes: [.foregroundColor: NSColor.secondaryLabelColor]
-            ))
+    /// Secondary line under the title. Subtitles need macOS 14.4, so older
+    /// systems fold the detail into the title instead.
+    private func setDetail(_ detail: String?, on item: NSMenuItem) {
+        guard let detail else { return }
+        if #available(macOS 14.4, *) {
+            item.subtitle = detail
+        } else {
+            item.title += " · \(detail)"
         }
-        return text
-    }
-
-    /// Widest text row in menu font, plus room for the key-hint column,
-    /// while the indicator itself stays aligned with the menu text.
-    private func measureBarWidth(enabled: [ProviderID]) -> CGFloat {
-        let font = NSFont.menuFont(ofSize: NSFont.systemFontSize)
-        var widest: CGFloat = 0
-        for id in enabled {
-            let snap = store.snapshot(for: id)
-            widest = max(widest, (headerText(for: id, snap: snap) as NSString)
-                .size(withAttributes: [.font: font]).width)
-            let windows: [(String, UsageWindow?)] = [("Session", snap?.session), ("Weekly", snap?.weekly)]
-                + (snap?.extraRows.map { ($0.label, $0.window) } ?? [])
-            for (label, window) in windows {
-                if let text = rowText(label: label, window: window) {
-                    let sized = NSMutableAttributedString(attributedString: text)
-                    sized.addAttribute(.font, value: font, range: NSRange(location: 0, length: sized.length))
-                    widest = max(widest, sized.size().width)
-                }
-            }
-        }
-        return min(460, max(220, widest + 84))
     }
 
     /// Non-functional row: full-contrast by default, gray when dimmed.
@@ -208,27 +170,17 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private func resetText(_ date: Date?) -> String? {
         guard let date else { return nil }
         let remaining = date.timeIntervalSinceNow
-        if remaining <= 0 { return "resetting…" }
-        if remaining < 3600 { return "resets in \(Int(remaining / 60))m" }
+        if remaining <= 0 { return "Resetting…" }
         if remaining < 86400 {
-            let h = Int(remaining / 3600)
-            let m = Int(remaining.truncatingRemainder(dividingBy: 3600) / 60)
-            return m == 0 ? "resets in \(h)h" : "resets in \(h)h \(m)m"
+            let duration = Duration.seconds(remaining).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
+            return "Resets in \(duration)"
         }
-        // Longer windows read better as a calendar moment ("resets Sat 3:30 AM"),
+        // Longer windows read better as a calendar moment ("Resets Sat 3:30 AM"),
         // matching the Claude desktop app.
-        let formatter = DateFormatter()
-        formatter.setLocalizedDateFormatFromTemplate(remaining < 6 * 86400 ? "EEE jmm" : "MMM d jmm")
-        return "resets \(formatter.string(from: date))"
-    }
-
-    private static func barColor(forRemaining remaining: Double) -> NSColor {
-        switch remaining {
-        case 50...: .systemGreen
-        case 25..<50: .systemYellow
-        case 10..<25: .systemOrange
-        default: .systemRed
-        }
+        let style: Date.FormatStyle = remaining < 6 * 86400
+            ? .dateTime.weekday(.abbreviated).hour().minute()
+            : .dateTime.month(.abbreviated).day().hour().minute()
+        return "Resets \(date.formatted(style))"
     }
 
     // MARK: - Actions
@@ -238,7 +190,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     @objc private func refreshNow(_ sender: Any?) {
         guard !store.isRefreshing else { return }
         refreshItem?.title = "Refreshing…"
-        refreshView?.update(title: "Refreshing…", enabled: false)
+        refreshItem?.isEnabled = false
         Task {
             await store.refresh(userInitiated: true)
             self.rebuild()
@@ -260,25 +212,24 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 }
 
-/// AppKit owns capacity rendering; this view only supplies menu insets.
+/// AppKit owns capacity rendering and color; this view only supplies menu
+/// insets. Its flexible width lets the menu stretch it to the menu width.
 final class BarView: NSView {
     private let indicator = NSLevelIndicator()
     private static let horizontalInset: CGFloat = 16
 
-    init(width: CGFloat, remaining: Double, color: NSColor, label: String) {
-        super.init(frame: NSRect(x: 0, y: 0, width: width, height: 16))
+    init(remaining: Double, label: String) {
+        super.init(frame: NSRect(x: 0, y: 0, width: StatusMenu.minimumWidth, height: 16))
         autoresizingMask = [.width]
         indicator.levelIndicatorStyle = .continuousCapacity
         indicator.minValue = 0
         indicator.maxValue = 100
+        // A critical value below the warning value flags low levels, like
+        // Battery: green normally, yellow under 25%, red under 10%.
+        indicator.warningValue = 25
+        indicator.criticalValue = 10
         indicator.doubleValue = remaining.isFinite ? min(100, max(0, remaining)) : 0
         indicator.isEditable = false
-        indicator.drawsTieredCapacityLevels = false
-        // Color describes remaining quota (low is a warning), so all
-        // native capacity tiers use the same semantic color.
-        indicator.fillColor = color
-        indicator.warningFillColor = color
-        indicator.criticalFillColor = color
         indicator.setAccessibilityLabel("\(label) quota remaining")
         indicator.translatesAutoresizingMaskIntoConstraints = false
         addSubview(indicator)

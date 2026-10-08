@@ -1,32 +1,61 @@
+import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
-    @State private var codexEnabled = SettingsStore.isEnabled(.codex)
-    @State private var claudeEnabled = SettingsStore.isEnabled(.claude)
-    @State private var museEnabled = SettingsStore.isEnabled(.muse)
     @State private var launchAtLogin = SettingsStore.launchAtLogin
+    @State private var needsApproval = SettingsStore.launchAtLoginNeedsApproval
 
     var body: some View {
         Form {
             Section("Providers") {
-                Toggle("Codex", isOn: $codexEnabled)
-                    .onChange(of: codexEnabled) { _, v in SettingsStore.setEnabled(.codex, v) }
-                Toggle("Claude", isOn: $claudeEnabled)
-                    .onChange(of: claudeEnabled) { _, v in SettingsStore.setEnabled(.claude, v) }
-                Toggle("Muse", isOn: $museEnabled)
-                    .onChange(of: museEnabled) { _, v in SettingsStore.setEnabled(.muse, v) }
+                ForEach(ProviderID.allCases, id: \.self) { ProviderToggle(id: $0) }
             }
-            Section("General") {
-                Toggle("Launch at login", isOn: $launchAtLogin)
-                    .onChange(of: launchAtLogin) { _, v in
-                        SettingsStore.launchAtLogin = v
-                        launchAtLogin = SettingsStore.launchAtLogin
+            Section {
+                Toggle("Launch at login", isOn: Binding(
+                    get: { launchAtLogin },
+                    set: {
+                        SettingsStore.launchAtLogin = $0
+                        syncLoginState()
                     }
+                ))
+                if needsApproval {
+                    LabeledContent("Allow AIQuota in Login Items to finish.") {
+                        Button("Open Login Items…") { SMAppService.openSystemSettingsLoginItems() }
+                    }
+                }
+            } header: {
+                Text("General")
+            } footer: {
                 Text("Refreshes every 10 minutes and when opened.")
-                    .foregroundStyle(.secondary)
             }
         }
-        .padding()
-        .frame(width: 300)
+        .formStyle(.grouped)
+        .frame(width: 360)
+        .fixedSize(horizontal: false, vertical: true)
+        // Approval happens in System Settings; pick it up on return.
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            syncLoginState()
+        }
+    }
+
+    /// Re-reads the real login item state, which may differ from the request.
+    private func syncLoginState() {
+        launchAtLogin = SettingsStore.launchAtLogin
+        needsApproval = SettingsStore.launchAtLoginNeedsApproval
+    }
+}
+
+/// Stored under the same key the menu and refresh read.
+private struct ProviderToggle: View {
+    let id: ProviderID
+    @AppStorage private var isOn: Bool
+
+    init(id: ProviderID) {
+        self.id = id
+        _isOn = AppStorage(wrappedValue: true, SettingsStore.key(for: id))
+    }
+
+    var body: some View {
+        Toggle(id.displayName, isOn: $isOn)
     }
 }

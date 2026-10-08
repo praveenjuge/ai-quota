@@ -11,11 +11,7 @@ enum SettingsStore {
         defaults.object(forKey: key(for: id)) as? Bool ?? true
     }
 
-    static func setEnabled(_ id: ProviderID, _ value: Bool) {
-        defaults.set(value, forKey: key(for: id))
-    }
-
-    private static func key(for id: ProviderID) -> String {
+    static func key(for id: ProviderID) -> String {
         "provider.\(id.rawValue).enabled"
     }
 
@@ -27,8 +23,9 @@ enum SettingsStore {
         set { defaults.set(newValue, forKey: "keychain.approved") }
     }
 
+    /// On once registered, even while macOS still waits for approval.
     static var launchAtLogin: Bool {
-        get { SMAppService.mainApp.status == .enabled }
+        get { [.enabled, .requiresApproval].contains(SMAppService.mainApp.status) }
         set {
             do {
                 if newValue {
@@ -41,5 +38,10 @@ enum SettingsStore {
                 // throws here and the toggle simply stays off.
             }
         }
+    }
+
+    /// Registered, but the user still has to allow it in System Settings.
+    static var launchAtLoginNeedsApproval: Bool {
+        SMAppService.mainApp.status == .requiresApproval
     }
 }
