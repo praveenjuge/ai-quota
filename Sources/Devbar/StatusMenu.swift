@@ -1,7 +1,7 @@
 import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
-/// quota rows, running dev servers, then Refresh / Settings / Quit. All rows are stock menu
+/// quota rows, running dev servers, then Refresh / Worktrees / Settings / Quit. All rows are stock menu
 /// items: section headers, badged rows, plus native capacity indicators on
 /// their own lines. Rows stay one line each to keep the menu short.
 @MainActor
@@ -15,6 +15,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private let caffeinate = Caffeinate()
     private var ports: [ListeningPort] = []
     private let onCaffeinateChange: (Bool) -> Void
+    private let onWorktrees: () -> Void
     private let onSettings: () -> Void
     private let onQuit: () -> Void
 
@@ -22,12 +23,14 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         store: UsageStore,
         updater: UpdateController?,
         onCaffeinateChange: @escaping (Bool) -> Void,
+        onWorktrees: @escaping () -> Void,
         onSettings: @escaping () -> Void,
         onQuit: @escaping () -> Void
     ) {
         self.store = store
         self.updater = updater
         self.onCaffeinateChange = onCaffeinateChange
+        self.onWorktrees = onWorktrees
         self.onSettings = onSettings
         self.onQuit = onQuit
         super.init()
@@ -75,6 +78,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         caffeinateItem.target = self
         caffeinateItem.state = caffeinate.isOn ? .on : .off
         renderedMenu.addItem(caffeinateItem)
+        let worktrees = NSMenuItem(title: "Worktrees…", action: #selector(openWorktrees), keyEquivalent: "")
+        worktrees.target = self
+        renderedMenu.addItem(worktrees)
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         renderedMenu.addItem(settings)
@@ -322,6 +328,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         PortScanner.stop(port, force: force)
         ports.removeAll { $0.pid == port.pid }
         rebuild()
+    }
+
+    @objc private func openWorktrees(_ sender: Any?) {
+        onWorktrees()
     }
 
     @objc private func openSettings(_ sender: Any?) {

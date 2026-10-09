@@ -1,7 +1,7 @@
 import AppKit
 
-/// Plain AppKit entry point: the app is a status item plus one Settings
-/// window, both AppKit-owned. SwiftUI's Settings scene only opens through
+/// Plain AppKit entry point: the app is a status item plus the Worktrees
+/// and Settings windows, all AppKit-owned. SwiftUI's Settings scene only opens through
 /// SettingsLink/openSettings, which a status-item NSMenu can't reach.
 @main
 enum DevbarApp {
@@ -20,6 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store = UsageStore()
     private var refreshTimer: Timer?
     private let updater = UpdateController()
+    private lazy var worktreesWindow = WorktreesWindow()
     private lazy var settingsWindow = SettingsWindow(updater: UpdateController.isAvailable ? updater : nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -42,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if CommandLine.arguments.contains("--dump-worktrees") {
+            Task {
+                print(Dump.json(worktrees: await WorktreeScanner.scan()))
+                NSApp.terminate(nil)
+            }
+            return
+        }
 
         let item = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
         item.button?.imagePosition = .imageOnly
@@ -52,6 +60,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             store: store,
             updater: UpdateController.isAvailable ? updater : nil,
             onCaffeinateChange: { [weak self] in self?.updateIcon(caffeinated: $0) },
+            onWorktrees: { [weak self] in self?.worktreesWindow.show() },
             onSettings: { [weak self] in self?.settingsWindow.show() },
             onQuit: { NSApp.terminate(nil) }
         )
@@ -68,7 +77,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     /// Accessory apps show no menu bar, but its key equivalents still work
-    /// while the Settings window is key (⌘W closes it).
+    /// while a window is key (⌘W closes it).
     private static func mainMenu() -> NSMenu {
         let appMenu = NSMenu()
         appMenu.addItem(withTitle: "Close Window", action: #selector(NSWindow.performClose(_:)), keyEquivalent: "w")
@@ -117,6 +126,18 @@ enum Dump {
     static func json(ports: [ListeningPort]) -> String {
         let rows: [[String: Any]] = ports.map {
             ["port": $0.port, "pid": $0.pid, "process": $0.process, "directory": $0.directory]
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys, .prettyPrinted])) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    static func json(worktrees: [Worktree]) -> String {
+        let rows: [[String: Any]] = worktrees.sorted { $0.path < $1.path }.map {
+            [
+                "path": $0.path, "repository": $0.repository, "branch": $0.branch as Any,
+                "locked": $0.isLocked, "missing": $0.isMissing, "changes": $0.hasChanges, "merged": $0.isMerged,
+                "last_active": ISO8601DateFormatter().string(from: $0.lastActive), "stale": $0.isStale,
+            ]
         }
         let data = (try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys, .prettyPrinted])) ?? Data()
         return String(data: data, encoding: .utf8) ?? "[]"

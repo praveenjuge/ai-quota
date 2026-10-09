@@ -1,6 +1,6 @@
 # Devbar
 
-Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, and Muse Code, the dev servers running on your Mac, and a Caffeinate toggle. Icon-only in the menu bar; click for a native menu.
+Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, and Muse Code, the dev servers running on your Mac, a Worktrees window for cleaning up git worktrees, and a Caffeinate toggle. Icon-only in the menu bar; click for a native menu.
 
 ## Requirements
 
@@ -13,6 +13,7 @@ Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, 
 swift build                                    # debug build
 .build/debug/Devbar --dump-usage              # headless JSON check
 .build/debug/Devbar --dump-ports              # detected dev servers as JSON
+.build/debug/Devbar --dump-worktrees          # git worktrees found in your home folder
 ./build-app.sh                                 # signed release bundle -> dist/Devbar.app
 open dist/Devbar.app
 ```
@@ -33,6 +34,16 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
 ## Dev Servers
 
 The menu lists TCP ports that dev servers are listening on (`lsof -nP -iTCP -sTCP:LISTEN`), scanned each time the menu opens. A listener counts as a dev server when its process was started from a project folder: system services and apps, which launchd starts in `/` or inside their app bundle, are left out. Each row shows `localhost:<port>` with the project folder and process name; its submenu opens it in the browser, copies the URL or PID, hides that process name, or stops the process (`SIGTERM`, or `SIGKILL` as Force Stop while holding ⌥).
+
+## Worktrees
+
+**Worktrees…** in the menu opens a small window listing every linked git worktree in your home folder, grouped by repository. It scans only while the window is open, and again each time you open it. Spotlight doesn't index `.git`, so the scan walks the home folder for repositories (skipping `~/Library`, hidden folders, and build/dependency folders), then runs `git worktree list --porcelain` for each one. A worktree inside a hidden folder like `.claude/worktrees` is still found through its repository.
+
+Each row shows the branch and when the worktree was last used: the newest of its folder and git's `HEAD`, `index`, and `logs/HEAD` for it. Checking for uncommitted changes runs `git status` with optional locks off, so the scan itself never counts as use. Rows are marked when their branch is merged, or when they have uncommitted changes or are locked (Claude Code locks worktrees while an agent runs).
+
+A branch is **merged** when merging it into the default branch would change nothing (`git merge-tree --write-tree` gives the default branch's own tree). That covers regular, rebase, and squash merges, and branches with no commits of their own. The default branch is the main checkout's branch and `origin/HEAD`, so a branch merged on the remote counts even when the local branch is behind.
+
+Delete runs `git worktree remove --force --force`, which deletes the folder with any uncommitted changes and drops git's record of it. With **Delete merged branches** on (the default, stored as `worktrees.deleteMergedBranches`), a merged branch is checked again and deleted with `git branch -D`; other branches are always kept. **Delete Older Than a Week** does the same for every worktree unused for 7 days, skipping locked ones. Both ask first and say which branches go and when uncommitted changes will be lost.
 
 ## Releases
 
