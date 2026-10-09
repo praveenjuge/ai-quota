@@ -20,7 +20,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     private var store = UsageStore()
     private var refreshTimer: Timer?
     private let updater = UpdateController()
-    private let settingsWindow = SettingsWindow()
+    private lazy var settingsWindow = SettingsWindow(updater: UpdateController.isAvailable ? updater : nil)
 
     func applicationDidFinishLaunching(_ notification: Notification) {
         NSApp.setActivationPolicy(.accessory)
@@ -99,6 +99,7 @@ enum Dump {
             guard let snap = store.snapshot(for: id) else { continue }
             var entry: [String: Any] = [
                 "plan": snap.plan as Any,
+                "account": snap.account.map(StatusMenu.masked) as Any,
                 "session": window(snap.session),
                 "weekly": window(snap.weekly),
                 "state": stateName(snap.state),

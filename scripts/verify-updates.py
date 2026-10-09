@@ -73,28 +73,38 @@ def scenario(source, action):
     def tree():
         try:
             text = run('interceptor', 'macos', 'tree', '--app', identifier,
-                       '--filter', 'all', '--depth', '8')
+                       '--filter', 'all', '--depth', '14')
         except subprocess.CalledProcessError:
             return ''
         trees.append(text)
         return text
+    def act(label):
+        # Refs expire whenever the menu rebuilds, so read a fresh tree and
+        # retry; a stale ref delivers nothing.
+        def attempt():
+            refs = re.findall(r'\[(e\d+)\] (?:menuitem|button) "' + re.escape(label) + '"', tree())
+            if not refs:
+                return False
+            try:
+                run('interceptor', 'macos', 'act', refs[-1])
+            except subprocess.CalledProcessError:
+                return False
+            return True
+        wait_for(attempt)
     try:
         if action in ('restart', 'quit'):
-            text = wait_for(lambda: (t if 'Restart and update' in (t := tree()) else None))
-            label = 'Restart and update' if action == 'restart' else 'Quit Devbar'
-            ref = re.findall(r'\[(e\d+)\] (?:menuitem|button) "' + label + '"', text)[-1]
-            run('interceptor', 'macos', 'act', ref)
+            wait_for(lambda: 'Restart and update' in tree())
+            act('Restart and update' if action == 'restart' else 'Quit Devbar')
             wait_for(lambda: plistlib.loads(info.read_bytes())['CFBundleVersion'] == '0.1.3')
             wait_for(lambda: process.poll() is not None)
             assert run('defaults', 'read', identifier, 'verificationMarker').strip() == 'retained'
             run('codesign', '--verify', '--deep', '--strict', str(app))
             if action == 'restart':
-                wait_for(lambda: 'Check for updates' in tree())
+                wait_for(lambda: 'Settings…' in tree())
         else:
-            wait_for(lambda: (t if 'Check for updates…' in (t := tree()) else None))
-            text = tree()
-            ref = re.findall(r'\[(e\d+)\] (?:menuitem|button) "Check for updates…"', text)[-1]
-            run('interceptor', 'macos', 'act', ref)
+            # Checking lives in Settings; the menu only offers a ready update.
+            act('Settings…')
+            act('Check for updates…')
             expected_title = 'You’re up to date' if action in ('equal', 'older') else 'Update failed — retry'
             wait_for(lambda: expected_title in tree())
             assert plistlib.loads(info.read_bytes())['CFBundleVersion'] == '0.1.2'

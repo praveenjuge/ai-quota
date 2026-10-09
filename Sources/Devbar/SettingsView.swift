@@ -2,6 +2,7 @@ import ServiceManagement
 import SwiftUI
 
 struct SettingsView: View {
+    let updater: UpdateController?
     @State private var launchAtLogin = SettingsStore.launchAtLogin
     @State private var needsApproval = SettingsStore.launchAtLoginNeedsApproval
     @State private var hiddenProcesses = SettingsStore.hiddenProcesses
@@ -45,6 +46,18 @@ struct SettingsView: View {
             } footer: {
                 Text("Refreshes every 10 minutes and when opened.")
             }
+            if let updater {
+                Section {
+                    LabeledContent("Version \(Self.version)") {
+                        Button(updater.title) { updater.activate() }
+                            .disabled(!updater.enabled)
+                    }
+                } header: {
+                    Text("Updates")
+                } footer: {
+                    Text("Updates download on their own. Restart from the menu when one is ready.")
+                }
+            }
         }
         .formStyle(.grouped)
         .frame(width: 360)
@@ -57,6 +70,10 @@ struct SettingsView: View {
         .onReceive(NotificationCenter.default.publisher(for: UserDefaults.didChangeNotification)) { _ in
             hiddenProcesses = SettingsStore.hiddenProcesses
         }
+    }
+
+    private static var version: String {
+        Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "–"
     }
 
     /// Re-reads the real login item state, which may differ from the request.
@@ -84,7 +101,12 @@ private struct ProviderToggle: View {
 /// The one Settings window, created on first use and reused after.
 @MainActor
 final class SettingsWindow {
+    private let updater: UpdateController?
     private var window: NSWindow?
+
+    init(updater: UpdateController?) {
+        self.updater = updater
+    }
 
     func show() {
         let window = self.window ?? makeWindow()
@@ -94,7 +116,7 @@ final class SettingsWindow {
     }
 
     private func makeWindow() -> NSWindow {
-        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView()))
+        let window = NSWindow(contentViewController: NSHostingController(rootView: SettingsView(updater: updater)))
         window.title = "Devbar Settings"
         window.styleMask = [.titled, .closable]
         window.isReleasedWhenClosed = false

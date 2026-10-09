@@ -21,6 +21,7 @@ enum CodexProvider {
             snap.state = .loggedOut("Not logged in — run `codex` once to sign in.")
             return snap
         }
+        snap.account = JSON.text(JSON.text(tokens["id_token"]).flatMap(claims)?["email"])
         if tokenExpired(accessToken) {
             snap.state = .expired("Token expired — use `codex` once to renew it.")
             return snap
@@ -110,13 +111,17 @@ enum CodexProvider {
     /// Local JWT expiry check. Undecodable or missing exp never fails —
     /// the usage call itself is the real test.
     private static func tokenExpired(_ token: String) -> Bool {
-        let parts = token.split(separator: ".")
-        guard parts.count >= 2 else { return false }
-        var payload = String(parts[1])
-        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
-        guard let data = Data(base64Encoded: payload),
-              let json = JSON.object(data),
-              let exp = JSON.number(json["exp"]) else { return false }
+        guard let exp = JSON.number(claims(token)?["exp"]) else { return false }
         return exp < Date().timeIntervalSince1970 + 60
+    }
+
+    /// Decodes a JWT payload without verifying it (display and expiry only).
+    private static func claims(_ token: String) -> [String: Any]? {
+        let parts = token.split(separator: ".")
+        guard parts.count >= 2 else { return nil }
+        var payload = parts[1].replacingOccurrences(of: "-", with: "+")
+            .replacingOccurrences(of: "_", with: "/")
+        payload += String(repeating: "=", count: (4 - payload.count % 4) % 4)
+        return Data(base64Encoded: payload).flatMap(JSON.object)
     }
 }

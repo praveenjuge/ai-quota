@@ -13,6 +13,7 @@ enum MuseProvider {
         var snap = ProviderSnapshot(id: id, plan: nil,
                                     session: UsageWindow(), weekly: UsageWindow(),
                                     state: .ok, fetchedAt: nil)
+        snap.account = JSON.text(metaLogin()?["user_email"])
         let approved: Bool = await MainActor.run { SettingsStore.keychainApproved }
         let keychainGated = !(allowKeychainPrompt || approved)
         let token: String
@@ -95,7 +96,9 @@ enum MuseProvider {
                            resetsAt: JSON.date(w["resets_at"]))
     }
 
-    private static func loadToken(mayTouchKeychain: Bool, promptTimeout: Bool) async throws -> String? {
+    /// The `meta` login in auth.json: the inline token, when one is kept
+    /// there, plus the signed-in user's profile.
+    private static func metaLogin() -> [String: Any]? {
         let path: String
         if let override = Home.env("MUSE_AUTH_PATH") {
             path = override
@@ -104,13 +107,14 @@ enum MuseProvider {
         } else {
             path = ("~/.config/muse/auth.json" as NSString).expandingTildeInPath
         }
-        var inline: String?
-        if let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
-           let root = JSON.object(data),
-           let providers = JSON.dict(root["providers"]),
-           let meta = JSON.dict(providers["meta"]) {
-            inline = JSON.text(meta["access_token"])
-        }
+        guard let data = try? Data(contentsOf: URL(fileURLWithPath: path)),
+              let root = JSON.object(data),
+              let providers = JSON.dict(root["providers"]) else { return nil }
+        return JSON.dict(providers["meta"])
+    }
+
+    private static func loadToken(mayTouchKeychain: Bool, promptTimeout: Bool) async throws -> String? {
+        let inline = JSON.text(metaLogin()?["access_token"])
         if let inline, !inline.isEmpty { return inline }
         guard mayTouchKeychain else { return nil }
         let cacheKey = "muse:ai.meta.dev.credentials"

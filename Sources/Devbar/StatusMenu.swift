@@ -2,8 +2,8 @@ import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
 /// quota rows, running dev servers, then Refresh / Settings / Quit. All rows are stock menu
-/// items: section headers, badged rows with subtitles, plus native
-/// capacity indicators on their own lines.
+/// items: section headers, badged rows, plus native capacity indicators on
+/// their own lines. Rows stay one line each to keep the menu short.
 @MainActor
 final class StatusMenu: NSObject, NSMenuDelegate {
     let menu = NSMenu()
@@ -60,14 +60,15 @@ final class StatusMenu: NSObject, NSMenuDelegate {
             addPortsSection()
         }
         renderedMenu.addItem(.separator())
-        let refresh = NSMenuItem(
-            title: store.isRefreshing ? "Refreshing…" : "Refresh",
-            action: #selector(refreshNow),
-            keyEquivalent: "r"
-        )
+        var refreshTitle = "Refresh"
+        if store.isRefreshing {
+            refreshTitle = "Refreshing…"
+        } else if let last = store.lastRefresh {
+            refreshTitle += " · Updated \(last.formatted(date: .omitted, time: .shortened))"
+        }
+        let refresh = NSMenuItem(title: refreshTitle, action: #selector(refreshNow), keyEquivalent: "r")
         refresh.target = self
         refresh.isEnabled = !store.isRefreshing
-        setDetail(store.lastRefresh.map { "Updated \($0.formatted(date: .omitted, time: .shortened))" }, on: refresh)
         refreshItem = refresh
         renderedMenu.addItem(refresh)
         let caffeinateItem = NSMenuItem(title: "Caffeinate", action: #selector(toggleCaffeinate), keyEquivalent: "")
@@ -77,7 +78,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let settings = NSMenuItem(title: "Settings…", action: #selector(openSettings), keyEquivalent: ",")
         settings.target = self
         renderedMenu.addItem(settings)
-        if let updater {
+        // Checking lives in Settings; the menu only offers a ready update.
+        updateItem = nil
+        if let updater, updater.isReady {
             let item = NSMenuItem(title: updater.title, action: #selector(updateApp), keyEquivalent: "")
             item.target = self
             item.isEnabled = updater.enabled
@@ -111,8 +114,12 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     }
 
     func updateUpdateItem() {
-        updateItem?.title = updater?.title ?? ""
-        updateItem?.isEnabled = updater?.enabled ?? false
+        guard let updater else { return }
+        // Download progress updates often; only rebuild when the row
+        // appears or goes away.
+        guard updater.isReady == (updateItem != nil) else { return rebuild() }
+        updateItem?.title = updater.title
+        updateItem?.isEnabled = updater.enabled
     }
 
     @objc private func updateApp(_ sender: Any?) {
@@ -123,36 +130,37 @@ final class StatusMenu: NSObject, NSMenuDelegate {
 
     private func addSection(for id: ProviderID) {
         let snap = store.snapshot(for: id)
-        renderedMenu.addItem(.sectionHeader(title: headerText(for: id, snap: snap)))
-        if let message = snap?.state.message {
+        let message = snap?.state.message
+        var rows: [(label: String, window: UsageWindow)] = []
+        if let snap, message == nil {
+            rows = [("Session", snap.session), ("Weekly", snap.weekly)]
+                + snap.extraRows.map { ($0.label, $0.window) }
+            rows.removeAll { $0.window.remainingPercent == nil }
+        }
+        // An idle provider says so in its header instead of a row of its own.
+        let idle = snap != nil && message == nil && rows.isEmpty
+        renderedMenu.addItem(.sectionHeader(title: headerText(for: id, snap: snap, idle: idle)))
+        if let message {
             renderedMenu.addItem(info(message, dimmed: true))
-            return
+        } else if snap == nil {
+            renderedMenu.addItem(info("Loading…", dimmed: true))
         }
-        var rows = 0
-        rows += addRow(label: "Session", window: snap?.session)
-        rows += addRow(label: "Weekly", window: snap?.weekly)
-        for extra in snap?.extraRows ?? [] {
-            rows += addRow(label: extra.label, window: extra.window)
-        }
-        if rows == 0 {
-            renderedMenu.addItem(info("No usage reported yet", dimmed: true))
+        for row in rows {
+            addRow(label: row.label, window: row.window)
         }
     }
 
-    /// One quota row: label with the remaining percentage as a badge and
-    /// the reset time as subtitle, plus a draining bar on its own line
-    /// below. Returns 1 when rendered.
-    @discardableResult
-    private func addRow(label: String, window: UsageWindow?) -> Int {
-        guard let remaining = window?.remainingPercent else { return 0 }
+    /// One quota row: label with the remaining percentage and reset time
+    /// as a badge, plus a draining bar on its own line below.
+    private func addRow(label: String, window: UsageWindow) {
+        guard let remaining = window.remainingPercent else { return }
         let row = info(label)
-        row.badge = NSMenuItemBadge(string: "\((remaining / 100).formatted(.percent.precision(.fractionLength(0)))) left")
-        setDetail(resetText(window?.resetsAt), on: row)
+        let percent = (remaining / 100).formatted(.percent.precision(.fractionLength(0)))
+        row.badge = NSMenuItemBadge(string: [percent, resetText(window.resetsAt)].compactMap { $0 }.joined(separator: " · "))
         renderedMenu.addItem(row)
         let barItem = NSMenuItem()
         barItem.view = BarView(remaining: remaining, label: label)
         renderedMenu.addItem(barItem)
-        return 1
     }
 
     // MARK: - Dev servers
@@ -165,8 +173,8 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         ports = await PortScanner.scan(hidden: Set(SettingsStore.hiddenProcesses))
     }
 
+    /// No section header: `localhost:<port>` rows explain themselves.
     private func addPortsSection() {
-        renderedMenu.addItem(.sectionHeader(title: "Dev Servers"))
         if ports.isEmpty {
             renderedMenu.addItem(info("No dev servers running", dimmed: true))
         }
@@ -202,10 +210,21 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return item
     }
 
-    private func headerText(for id: ProviderID, snap: ProviderSnapshot?) -> String {
-        var header = id.displayName
-        if let plan = snap?.plan { header += " · \(plan)" }
-        return header
+    private func headerText(for id: ProviderID, snap: ProviderSnapshot?, idle: Bool) -> String {
+        var parts = [id.displayName]
+        if let plan = snap?.plan { parts.append(plan) }
+        if idle { parts.append("Idle") }
+        if let account = snap?.account { parts.append(Self.masked(account)) }
+        return parts.joined(separator: " · ")
+    }
+
+    /// "hello@example.com" → "he•••@example.com": enough to tell accounts
+    /// apart without showing the full address in screenshots.
+    static func masked(_ email: String) -> String {
+        guard let at = email.lastIndex(of: "@"), at > email.startIndex else { return email }
+        let name = email[..<at]
+        let kept = name.prefix(name.count > 3 ? 2 : 1)
+        return "\(kept)•••\(email[at...])"
     }
 
     /// Secondary line under the title. Subtitles need macOS 14.4, so older
@@ -227,20 +246,20 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         return item
     }
 
+    /// Short reset time for the badge: "in 4h 50m", or a calendar moment
+    /// ("Sat 3:30 AM") for longer windows, matching the Claude desktop app.
     private func resetText(_ date: Date?) -> String? {
         guard let date else { return nil }
         let remaining = date.timeIntervalSinceNow
-        if remaining <= 0 { return "Resetting…" }
+        if remaining <= 0 { return "resetting" }
         if remaining < 86400 {
             let duration = Duration.seconds(remaining).formatted(.units(allowed: [.hours, .minutes], width: .narrow))
-            return "Resets in \(duration)"
+            return "in \(duration)"
         }
-        // Longer windows read better as a calendar moment ("Resets Sat 3:30 AM"),
-        // matching the Claude desktop app.
         let style: Date.FormatStyle = remaining < 6 * 86400
             ? .dateTime.weekday(.abbreviated).hour().minute()
             : .dateTime.month(.abbreviated).day().hour().minute()
-        return "Resets \(date.formatted(style))"
+        return date.formatted(style)
     }
 
     // MARK: - Actions

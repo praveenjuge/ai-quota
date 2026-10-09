@@ -11,6 +11,7 @@ import Foundation
 enum ClaudeProvider {
     static let id = ProviderID.claude
     private static let usageURL = URL(string: "https://api.anthropic.com/api/oauth/usage?cedar_ember=1")!
+    private static let profileURL = URL(string: "https://api.anthropic.com/api/oauth/profile")!
     private static let keychainService = "Claude Code-credentials"
     private static let approvalMessage = "Keychain approval needed — click Refresh, then choose Always Allow."
 
@@ -74,7 +75,7 @@ enum ClaudeProvider {
         var retried = false
         while true {
             do {
-                response = try await HTTP.send(usageRequest(token: credential.accessToken))
+                response = try await HTTP.send(request(usageURL, token: credential.accessToken))
             } catch {
                 snap.state = .transient("Network error — will retry on next refresh.")
                 return snap
@@ -107,6 +108,7 @@ enum ClaudeProvider {
             return snap
         }
         snap.plan = credential.plan
+        snap.account = await accountEmail(token: credential.accessToken)
         // Newer responses describe every quota in `limits` (the shape the
         // Claude desktop app renders, including model-scoped weekly rows
         // such as "Weekly · Fable"); older ones only carry the fixed
@@ -288,8 +290,24 @@ enum ClaudeProvider {
         return root["claudeAiOauth"] == nil && root["mcpOAuth"] != nil
     }
 
-    private static func usageRequest(token: String) -> URLRequest {
-        HTTP.get(usageURL, headers: [
+    /// The email of the login actually in use. Several logins may exist
+    /// (CLI, desktop app), so it comes from the token, not a config file.
+    /// Cached per token; a failed lookup only leaves the header without it.
+    private static func accountEmail(token: String) async -> String? {
+        let cacheKey = "claude-email:" + SHA256.hash(data: Data(token.utf8)).map { String(format: "%02x", $0) }.joined()
+        if let cached = await CredentialCache.shared.get(cacheKey) {
+            return String(decoding: cached, as: UTF8.self)
+        }
+        guard let response = try? await HTTP.send(request(profileURL, token: token)),
+              (200..<300).contains(response.status),
+              let account = JSON.object(response.body).flatMap({ JSON.dict($0["account"]) }),
+              let email = JSON.text(account["email"]) ?? JSON.text(account["email_address"]) else { return nil }
+        await CredentialCache.shared.set(cacheKey, Data(email.utf8))
+        return email
+    }
+
+    private static func request(_ url: URL, token: String) -> URLRequest {
+        HTTP.get(url, headers: [
             "Authorization": "Bearer \(token)",
             "Accept": "application/json",
             "Content-Type": "application/json",
@@ -298,21 +316,29 @@ enum ClaudeProvider {
         ])
     }
 
+    /// "team" + "default_claude_max_5x" reads as "Team · Max 5x"; a Max
+    /// plan is just "Max 5x". Default tiers add nothing and are dropped.
+    static func planName(subscription: String?, tier: String?) -> String? {
+        let plan = subscription.map { $0.prefix(1).uppercased() + $0.dropFirst() }
+        guard let tier, let range = tier.range(of: #"max_\d+x$"#, options: .regularExpression) else {
+            return plan
+        }
+        let usage = "Max " + tier[range].dropFirst("max_".count)
+        guard let plan, !usage.hasPrefix(plan) else { return usage }
+        return "\(plan) · \(usage)"
+    }
+
     /// Parses the credentials document ({claudeAiOauth: {...}}); a blob that
     /// is not JSON is treated as a bare token.
     private static func parseBlob(_ data: Data) -> Credential? {
         if let root = JSON.object(data) {
             guard let oauth = JSON.dict(root["claudeAiOauth"]),
                   let token = JSON.text(oauth["accessToken"]) else { return nil }
-            var plan: String?
-            if let sub = JSON.text(oauth["subscriptionType"]) { plan = sub }
-            if let tier = JSON.text(oauth["rateLimitTier"]) {
-                plan = [plan, tier].compactMap { $0 }.joined(separator: " · ")
-            }
             return Credential(accessToken: token,
                               expiresAtMs: JSON.number(oauth["expiresAt"]),
                               scopes: oauth["scopes"] as? [String],
-                              plan: plan)
+                              plan: planName(subscription: JSON.text(oauth["subscriptionType"]),
+                                             tier: JSON.text(oauth["rateLimitTier"])))
         }
         if let token = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
            !token.isEmpty {

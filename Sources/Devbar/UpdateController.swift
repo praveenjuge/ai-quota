@@ -3,18 +3,24 @@ import Sparkle
 import OSLog
 
 /// Sparkle owns verification, staging, replacement and relaunch. This object
-/// only maps its lifecycle onto the status menu; it never handles credentials.
+/// only maps its lifecycle onto Settings (checking) and the status menu (a
+/// ready update); it never handles credentials.
 @MainActor
+@Observable
 final class UpdateController: NSObject, SPUUpdaterDelegate, SPUUserDriver {
     private(set) var title = "Check for updates…"
     private(set) var enabled = true
-    var onChange: (() -> Void)?
-    private var updater: SPUUpdater!
-    private var install: (() -> Void)?
-    private var manual = false
-    private var expected: UInt64 = 0
-    private var received: UInt64 = 0
-    private let logger = Logger(subsystem: "com.praveenjuge.devbar", category: "updates")
+    /// An update is waiting for the user to install it.
+    private(set) var isReady = false
+    @ObservationIgnored var onChange: (() -> Void)?
+    @ObservationIgnored private var updater: SPUUpdater!
+    @ObservationIgnored private var install: (() -> Void)? {
+        didSet { isReady = install != nil }
+    }
+    @ObservationIgnored private var manual = false
+    @ObservationIgnored private var expected: UInt64 = 0
+    @ObservationIgnored private var received: UInt64 = 0
+    @ObservationIgnored private let logger = Logger(subsystem: "com.praveenjuge.devbar", category: "updates")
 
     static var isAvailable: Bool {
         #if DEBUG

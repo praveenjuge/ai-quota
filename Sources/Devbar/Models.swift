@@ -67,6 +67,8 @@ struct ExtraRow: Sendable {
 struct ProviderSnapshot: Sendable {
     var id: ProviderID
     var plan: String?
+    /// Signed-in email, shown masked in the menu header.
+    var account: String? = nil
     var session: UsageWindow
     var weekly: UsageWindow
     var extraRows: [ExtraRow] = []

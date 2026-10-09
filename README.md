@@ -28,7 +28,7 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
   - Muse: `~/.config/muse/auth.json` or Keychain `ai.meta.dev.credentials/meta` → `POST api.meta.ai/muse-code/key` (minted key is discarded)
 - Keychain is read via the `/usr/bin/security` subprocess (stable attribution, so one Always Allow sticks), blobs are cached in memory, and background refreshes never prompt.
 - Refreshes every 10 minutes and whenever the menu opens. Transient failures (network, 429, 5xx) keep last-good data; durable ones (logout, expired) replace it.
-- Menu rows are stock `NSMenuItem`s: section headers per provider, quota rows with the remaining percentage as a badge and the reset time as subtitle. Each quota bar is a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text; AppKit colors it (yellow under 25%, red under 10%).
+- Menu rows are stock `NSMenuItem`s: section headers per provider (plan and masked sign-in email, or **Idle** when no quota is in use), quota rows with the remaining percentage and reset time as one badge. Each quota bar is a native `NSLevelIndicator` inside a resizing menu view, inset to align with the menu text; AppKit colors it (yellow under 25%, red under 10%).
 
 ## Dev Servers
 
@@ -58,13 +58,14 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific passwo
 
 ## Settings
 
-Provider toggles, Show dev servers (with a list of hidden processes to restore), launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `devServers.enabled`, `devServers.hidden`, `keychainApproved`).
+Provider toggles, Show dev servers (with a list of hidden processes to restore), launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), the app version with Check for updates, and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `devServers.enabled`, `devServers.hidden`, `keychainApproved`).
 
 ## Automatic updates
 
 Release `.app` bundles use Sparkle 2.10.0. They check at startup and every six
-hours, download verified updates in the background, and show update status below
-Settings. Choose **Restart and update**, or quit normally to install for the next
+hours and download verified updates in the background. Check for updates is in
+Settings; once an update is ready, the menu shows **Restart and update** below
+Settings. Choose it, or quit normally to install for the next
 launch. Debug builds and `--dump-usage` do not start the updater. No credentials or
 system profile are sent to the update feed.
 
@@ -104,8 +105,8 @@ and rejection of invalid feeds/archives. Results are saved in
 `dist/verification/update-e2e.json`; each result links retained menu trees and
 app logs. Production apps and preferences are untouched.
 
-Refresh and Check for updates are stock menu items, so clicking them closes the
-menu like any system menu. Reopen it to see **Refreshing…** or the update result.
+Refresh is a stock menu item, so clicking it closes the menu like any system
+menu. Reopen it to see **Refreshing…**. Check for updates shows its result in Settings.
 
 To verify menu tracking with the canonical menu implementation:
 
@@ -114,5 +115,5 @@ bash scripts/verify-menu-feedback.sh dist/e2e-source/Devbar.app
 ```
 
 The signed test host opens the menu, asserts it stays open while the refresh
-rebuilds it, then checks for updates and asserts the result shows when the menu
-reopens. Results are retained.
+rebuilds it, then checks for updates and asserts an up-to-date result leaves the
+menu unchanged. Results are retained.

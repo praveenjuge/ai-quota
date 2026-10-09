@@ -62,31 +62,35 @@ final class FeedbackTest: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 if didOpen { fail("menu closed while refreshing") }
                 return
             }
-            guard let refresh = item("Refresh"), refresh.subtitle?.hasPrefix("Updated ") == true else { return }
+            guard status.menu.items.contains(where: { $0.title.hasPrefix("Refresh · Updated ") }) else { return }
             guard status.menu.items.allSatisfy({ $0.view == nil }) else {
                 fail("action rows must be stock menu items")
                 return
             }
+            guard item("Check for updates…") == nil else {
+                fail("checking for updates belongs in Settings")
+                return
+            }
             print("PASS: Menu stays open while the refresh rebuilds it")
-            print("PASS: Refresh is a stock item with its update time as subtitle")
+            print("PASS: Refresh is one stock row with its update time in the title")
             stage = 1
             status.menu.cancelTracking()
         case 1:
-            guard !isOpen, updater.enabled,
-                  let check = item("Check for updates…") else { return }
+            guard !isOpen, updater.enabled else { return }
             stage = 2
-            status.menu.performActionForItem(at: status.menu.index(of: check))
+            // The Settings button calls this.
+            updater.activate()
         case 2:
             guard updater.title == "You’re up to date" else { return }
             stage = 3
             openMenu()
         default:
             guard isOpen else { return }
-            guard item("You’re up to date") != nil else {
-                fail("update result missing from reopened menu")
+            guard item(updater.title) == nil else {
+                fail("the menu should only offer an update that is ready")
                 return
             }
-            print("PASS: Check for updates shows its result when the menu reopens")
+            print("PASS: An up-to-date check leaves the menu unchanged")
             timer.invalidate()
             status.menu.cancelTracking()
             NSApp.terminate(nil)
