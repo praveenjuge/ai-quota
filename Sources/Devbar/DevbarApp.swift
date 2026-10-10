@@ -43,6 +43,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             }
             return
         }
+        if CommandLine.arguments.contains("--dump-camera") {
+            Task {
+                print(Dump.json(camera: await CameraAccess.scan()))
+                NSApp.terminate(nil)
+            }
+            return
+        }
         if CommandLine.arguments.contains("--dump-worktrees") {
             Task {
                 print(Dump.json(worktrees: await WorktreeScanner.scan()))
@@ -140,6 +147,23 @@ enum Dump {
             ]
         }
         let data = (try? JSONSerialization.data(withJSONObject: rows, options: [.sortedKeys, .prettyPrinted])) ?? Data()
+        return String(data: data, encoding: .utf8) ?? "[]"
+    }
+
+    static func json(camera: CameraAccess.Scan) -> String {
+        let root: Any = switch camera {
+        case .needsFullDiskAccess: ["error": "needs_full_disk_access"]
+        case .failed: ["error": "failed"]
+        case .apps(let apps): apps.map { app -> [String: Any] in
+            let status = switch app.status {
+            case .allowed: "allowed"
+            case .denied: "denied"
+            case .asksNextTime: "asks_next_time"
+            }
+            return ["bundle_id": app.bundleID, "name": app.name, "status": status]
+        }
+        }
+        let data = (try? JSONSerialization.data(withJSONObject: root, options: [.sortedKeys, .prettyPrinted])) ?? Data()
         return String(data: data, encoding: .utf8) ?? "[]"
     }
 

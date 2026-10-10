@@ -1,7 +1,8 @@
 import AppKit
 
 /// Native status-item menu (Battery-menu style): provider sections with
-/// quota rows, running dev servers, then Refresh / Worktrees / Settings / Quit. All rows are stock menu
+/// quota rows, running dev servers, then Refresh / Caffeinate / Camera /
+/// Worktrees / Settings / Quit. All rows are stock menu
 /// items: section headers, badged rows, plus native capacity indicators on
 /// their own lines. Rows stay one line each to keep the menu short.
 @MainActor
@@ -14,6 +15,7 @@ final class StatusMenu: NSObject, NSMenuDelegate {
     private var refreshItem: NSMenuItem?
     private let caffeinate = Caffeinate()
     private var ports: [ListeningPort] = []
+    private var camera: CameraAccess.Scan?
     private let onCaffeinateChange: (Bool) -> Void
     private let onWorktrees: () -> Void
     private let onSettings: () -> Void
@@ -43,6 +45,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         rebuild()
         Task {
             await refreshPorts()
+            self.rebuild()
+        }
+        Task {
+            camera = await CameraAccess.scan()
             self.rebuild()
         }
     }
@@ -78,6 +84,9 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         caffeinateItem.target = self
         caffeinateItem.state = caffeinate.isOn ? .on : .off
         renderedMenu.addItem(caffeinateItem)
+        let cameraItem = NSMenuItem(title: "Camera", action: nil, keyEquivalent: "")
+        cameraItem.submenu = cameraMenu()
+        renderedMenu.addItem(cameraItem)
         let worktrees = NSMenuItem(title: "Worktrees…", action: #selector(openWorktrees), keyEquivalent: "")
         worktrees.target = self
         renderedMenu.addItem(worktrees)
@@ -111,6 +120,10 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         rebuild()
         Task {
             await refreshPorts()
+            self.rebuild()
+        }
+        Task {
+            camera = await CameraAccess.scan()
             self.rebuild()
         }
         Task {
@@ -213,6 +226,58 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: "")
         item.target = self
         item.representedObject = port
+        return item
+    }
+
+    // MARK: - Camera
+
+    /// Apps in Privacy & Security → Camera, checked while allowed. Clicking
+    /// an allowed app revokes it; turning one back on happens in macOS's own
+    /// prompt or in System Settings, since only those can grant access.
+    private func cameraMenu() -> NSMenu {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+        switch camera {
+        case nil:
+            menu.addItem(info("Loading…", dimmed: true))
+        case .needsFullDiskAccess?:
+            menu.addItem(info("Needs Full Disk Access", dimmed: true))
+            menu.addItem(action("Open Full Disk Access Settings…", #selector(openFullDiskAccessSettings)))
+            return menu
+        case .failed?:
+            menu.addItem(info("Couldn’t read camera access", dimmed: true))
+        case .apps(let apps)?:
+            if apps.isEmpty { menu.addItem(info("No apps have asked yet", dimmed: true)) }
+            for app in apps { menu.addItem(cameraRow(app)) }
+        }
+        menu.addItem(.separator())
+        menu.addItem(action("Open Camera Settings…", #selector(openCameraSettings)))
+        return menu
+    }
+
+    private func cameraRow(_ app: CameraApp) -> NSMenuItem {
+        let item: NSMenuItem
+        switch app.status {
+        case .allowed:
+            item = action(app.name, #selector(revokeCamera))
+            item.state = .on
+        case .denied:
+            item = action(app.name, #selector(openCameraSettings))
+            setDetail("Off · Turn on in Settings", on: item)
+        case .asksNextTime:
+            item = action(app.name, #selector(openCameraApp))
+            setDetail("Asks next time it uses the camera", on: item)
+        }
+        item.representedObject = app
+        let icon = NSWorkspace.shared.icon(forFile: app.path)
+        icon.size = NSSize(width: 16, height: 16)
+        item.image = icon
+        return item
+    }
+
+    private func action(_ title: String, _ selector: Selector) -> NSMenuItem {
+        let item = NSMenuItem(title: title, action: selector, keyEquivalent: "")
+        item.target = self
         return item
     }
 
@@ -328,6 +393,28 @@ final class StatusMenu: NSObject, NSMenuDelegate {
         PortScanner.stop(port, force: force)
         ports.removeAll { $0.pid == port.pid }
         rebuild()
+    }
+
+    @objc private func revokeCamera(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? CameraApp else { return }
+        Task {
+            if !(await CameraAccess.revoke(app)) { NSSound.beep() }
+            camera = await CameraAccess.scan()
+            self.rebuild()
+        }
+    }
+
+    @objc private func openCameraApp(_ sender: NSMenuItem) {
+        guard let app = sender.representedObject as? CameraApp else { return }
+        NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: app.path), configuration: .init())
+    }
+
+    @objc private func openCameraSettings(_ sender: Any?) {
+        NSWorkspace.shared.open(CameraAccess.settingsURL)
+    }
+
+    @objc private func openFullDiskAccessSettings(_ sender: Any?) {
+        NSWorkspace.shared.open(CameraAccess.fullDiskAccessURL)
     }
 
     @objc private func openWorktrees(_ sender: Any?) {

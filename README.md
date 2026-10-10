@@ -1,6 +1,6 @@
 # Devbar
 
-Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, and Muse Code, the dev servers running on your Mac, a Worktrees window for cleaning up git worktrees, and a Caffeinate toggle. Icon-only in the menu bar; click for a native menu.
+Native macOS menu-bar app for developers: remaining AI quota for Codex, Claude, and Muse Code, the dev servers running on your Mac, a Worktrees window for cleaning up git worktrees, a Caffeinate toggle, and a Camera menu for revoking apps' camera access. Icon-only in the menu bar; click for a native menu.
 
 ## Requirements
 
@@ -14,6 +14,7 @@ swift build                                    # debug build
 .build/debug/Devbar --dump-usage              # headless JSON check
 .build/debug/Devbar --dump-ports              # detected dev servers as JSON
 .build/debug/Devbar --dump-worktrees          # git worktrees found in your home folder
+.build/debug/Devbar --dump-camera             # camera permissions (needs Full Disk Access)
 ./build-app.sh                                 # signed release bundle -> dist/Devbar.app
 open dist/Devbar.app
 ```
@@ -34,6 +35,12 @@ Set `CODESIGN_IDENTITY` to override the Developer ID signing identity used by `b
 ## Dev Servers
 
 The menu lists TCP ports that dev servers are listening on (`lsof -nP -iTCP -sTCP:LISTEN`), scanned each time the menu opens. A listener counts as a dev server when its process was started from a project folder: system services and apps, which launchd starts in `/` or inside their app bundle, are left out. Each row shows `localhost:<port>` with the project folder and process name; its submenu opens it in the browser, copies the URL or PID, hides that process name, or stops the process (`SIGTERM`, or `SIGKILL` as Force Stop while holding ⌥).
+
+## Camera
+
+**Camera** in the menu lists the apps in Privacy & Security → Camera, checked while they're allowed. Click an allowed app to revoke it (`tccutil reset Camera <bundle id>`); the app asks again the next time it uses the camera, and allowing that prompt turns it back on. macOS has no public way for another app to grant camera access, so that prompt or System Settings is the only way back on. An app you've denied opens Camera settings when clicked.
+
+A reset removes the app from macOS's list, so Devbar remembers every app it has seen (`camera.knownApps`) and keeps showing it as *Asks next time*; clicking it opens the app. Reading the decisions means opening `~/Library/Application Support/com.apple.TCC/TCC.db` read-only, which needs Full Disk Access; until it's granted the submenu links to that setting. The database is never written.
 
 ## Worktrees
 
@@ -69,7 +76,7 @@ gh secret set APPLE_APP_SPECIFIC_PASSWORD            # paste app-specific passwo
 
 ## Settings
 
-Provider toggles, Show dev servers (with a list of hidden processes to restore), launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), the app version with Check for updates, and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `devServers.enabled`, `devServers.hidden`, `keychainApproved`).
+Provider toggles, Show dev servers (with a list of hidden processes to restore), launch at login (`SMAppService`, with a link to Login Items when macOS needs approval), the app version with Check for updates, and Quit. Preferences are stored via `UserDefaults` (`provider.<id>.enabled`, `devServers.enabled`, `devServers.hidden`, `keychainApproved`, `camera.knownApps`).
 
 ## Automatic updates
 
